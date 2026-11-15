@@ -307,11 +307,11 @@ public static class McpConfigStore
 
     public static string ValidateName(string name)
     {
-        if (string.IsNullOrWhiteSpace(name)) return "Name is required";
-        if (name.Length > 64) return "Name too long";
+        if (string.IsNullOrWhiteSpace(name)) return Localization.Strings.Get("mcp.nameRequired");
+        if (name.Length > 64) return Localization.Strings.Get("mcp.nameTooLong");
         foreach (var c in name)
             if (!char.IsLetterOrDigit(c) && c != '-' && c != '_')
-                return "Name can only contain letters, digits, '-' and '_'";
+                return Localization.Strings.Get("mcp.nameChars");
         return "";
     }
 }

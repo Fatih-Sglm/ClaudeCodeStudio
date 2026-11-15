@@ -17,52 +17,55 @@
 
             <div class="topbar-right">
                 <div class="actions">
-                    <button class="action-btn" id="btn-layout" title="Toggle layout" onclick="toggleLayout()">◫</button>
-                    <button class="action-btn" id="btn-diff" title="Git diff" onclick="openDiffModal()">⎇</button>
-                    <button class="action-btn" id="btn-usage" title="Usage & cost" onclick="openUsageWindow()">
-                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+                    <div class="cmd-wrap" id="history-wrap">
+                        <button class="action-btn" data-i18n-title="top.history" title="Session history" onclick="toggleHistory()">◷</button>
+                        <div class="cmd-menu" id="history-menu">
+                            <div class="cmd-section history-section-header">
+                                <span data-i18n="history.header">Previous sessions</span>
+                                <span class="history-count" id="history-count"></span>
+                            </div>
+                            <div class="history-filter">
+                                <input type="text" id="history-search" data-i18n-placeholder="history.filter" placeholder="Filter…" oninput="filterHistory()" />
+                                <label class="history-toggle">
+                                    <input type="checkbox" id="history-show-all" onchange="onShowAllToggle()" />
+                                    <span data-i18n="history.allProjects">all projects</span>
+                                </label>
+                            </div>
+                            <div id="history-list"><div class="cmd-item" style="color:#555;font-family:inherit" data-i18n="common.loading">Loading…</div></div>
+                            <div class="history-footer" id="history-footer"></div>
+                        </div>
+                    </div>
+                    <div class="cmd-wrap" id="more-wrap">
+                        <button class="cmd-trigger" id="btn-more" data-i18n-title="top.more" title="More" onclick="toggleMoreMenu()">⋯</button>
+                        <div class="cmd-menu more-menu" id="more-menu">
+                            <div class="cmd-item more-item" onclick="moreAction(event, toggleCmdMenu)"><span class="more-icon">⌘</span><span data-i18n="top.commands">Commands</span></div>
+                            <div class="cmd-item more-item" onclick="moreAction(event, openDiffModal)"><span class="more-icon">⎇</span><span data-i18n="top.diff">Git diff</span></div>
+                            <div class="cmd-item more-item" onclick="moreAction(event, openUsageWindow)"><span class="more-icon"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
                             <rect x="2" y="9.5"  width="3" height="4.5"/>
                             <rect x="6.5" y="5.5" width="3" height="8.5"/>
                             <rect x="11" y="2.5" width="3" height="11.5"/>
-                        </svg>
-                    </button>
-                    <button class="action-btn" id="btn-trusted" title="Trusted workspaces" onclick="openTrustedWorkspacesModal()">
-                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="7" width="10" height="7" rx="1.2"/>
-                            <path d="M 5 7 V 5 a 3 3 0 0 1 6 0 V 7"/>
-                        </svg>
-                    </button>
-                    <button class="action-btn" id="btn-mcp" title="MCP servers" onclick="openMcpWindow()">
-                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                        </svg></span><span data-i18n="top.usage">Usage &amp; cost</span></div>
+                            <div class="cmd-item more-item" onclick="moreAction(event, openPluginsModal)"><span class="more-icon"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M 6 2.5 a 1.5 1.5 0 0 1 3 0 V 4 H 12 V 7 h -1.5 a 1.5 1.5 0 0 0 0 3 H 12 V 13.5 H 3 V 10 h 1.5 a 1.5 1.5 0 0 0 0 -3 H 3 V 4 H 6 Z"/>
+                        </svg></span><span data-i18n="top.plugins">Plugins</span></div>
+                            <div class="cmd-item more-item" onclick="moreAction(event, openMcpWindow)"><span class="more-icon"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="12" height="4" rx="1"/>
                             <rect x="2" y="9" width="12" height="4" rx="1"/>
                             <circle cx="4.5" cy="5" r="0.6" fill="currentColor" stroke="none"/>
                             <circle cx="4.5" cy="11" r="0.6" fill="currentColor" stroke="none"/>
-                        </svg>
-                    </button>
-                    <div class="cmd-wrap" id="history-wrap">
-                        <button class="action-btn" title="Session history" onclick="toggleHistory()">◷</button>
-                        <div class="cmd-menu" id="history-menu">
-                            <div class="cmd-section history-section-header">
-                                <span>Previous sessions</span>
-                                <span class="history-count" id="history-count"></span>
-                            </div>
-                            <div class="history-filter">
-                                <input type="text" id="history-search" placeholder="Filter…" oninput="filterHistory()" />
-                                <label class="history-toggle">
-                                    <input type="checkbox" id="history-show-all" onchange="onShowAllToggle()" />
-                                    <span>all projects</span>
-                                </label>
-                            </div>
-                            <div id="history-list"><div class="cmd-item" style="color:#555;font-family:inherit">Loading…</div></div>
-                            <div class="history-footer" id="history-footer"></div>
+                        </svg></span><span data-i18n="top.mcp">MCP servers</span></div>
+                            <div class="cmd-item more-item" onclick="moreAction(event, openTrustedWorkspacesModal)"><span class="more-icon"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="7" width="10" height="7" rx="1.2"/>
+                            <path d="M 5 7 V 5 a 3 3 0 0 1 6 0 V 7"/>
+                        </svg></span><span data-i18n="top.trusted">Trusted workspaces</span></div>
+                            <div class="cmd-divider"></div>
+                            <div class="cmd-item more-item" id="btn-layout" onclick="moreAction(event, toggleLayout)"><span class="more-icon">◫</span><span data-i18n="top.compactLayout">Compact layout</span></div>
                         </div>
                     </div>
                 </div>
                 <div class="cmd-wrap" id="cmd-wrap">
-                    <button class="cmd-trigger" title="Commands" onclick="toggleCmdMenu()">⌘</button>
                     <div class="cmd-menu" id="cmd-menu">
-                        <div class="cmd-section">Built-in</div>
+                        <div class="cmd-section" data-i18n="cmd.builtin">Built-in</div>
                         <div class="cmd-item" onclick="runCommand('/model')">/model</div>
                         <div class="cmd-item" onclick="runCommand('/usage')">/usage</div>
                         <div class="cmd-item" onclick="runCommand('/compact')">/compact</div>
@@ -70,73 +73,94 @@
                         <div class="cmd-item" onclick="runCommand('/clear')">/clear</div>
                         <div id="project-cmds" style="display:none">
                             <div class="cmd-divider"></div>
-                            <div class="cmd-section">Project commands</div>
+                            <div class="cmd-section" data-i18n="cmd.project">Project commands</div>
                             <div id="project-cmd-list" class="slash-cmd-list"></div>
                         </div>
                         <div id="user-cmds" style="display:none">
                             <div class="cmd-divider"></div>
-                            <div class="cmd-section">User commands</div>
+                            <div class="cmd-section" data-i18n="cmd.user">User commands</div>
                             <div id="user-cmd-list" class="slash-cmd-list"></div>
                         </div>
                         <div id="skill-cmds" style="display:none">
                             <div class="cmd-divider"></div>
-                            <div class="cmd-section">Skills</div>
+                            <div class="cmd-section" data-i18n="cmd.skills">Skills</div>
                             <div id="skill-cmd-list" class="slash-cmd-list"></div>
                         </div>
                         <div class="cmd-divider"></div>
-                        <div class="cmd-section">Local</div>
-                        <div class="cmd-item" onclick="requestContextUsage()">◔ Context usage</div>
-                        <div class="cmd-item" onclick="requestMcpStatus()">🔌 MCP status</div>
-                        <div class="cmd-item" onclick="requestBuildErrors()">🔨 Send build errors</div>
-                        <div class="cmd-item" onclick="checkBackgroundTasks()">⏱ Check background tasks</div>
-                        <div class="cmd-item" onclick="requestDoctor()">🩺 Doctor</div>
-                        <div class="cmd-item" onclick="reauthenticate()">🔑 Re-authenticate…</div>
-                        <div class="cmd-item" onclick="openSideQuestionCard()">💬 Side question</div>
-                        <div class="cmd-item" onclick="exportChatToMarkdown()">⤓ Export to Markdown</div>
+                        <div class="cmd-section" data-i18n="cmd.local">Local</div>
+                        <div class="cmd-item" onclick="requestContextUsage()">◔ <span data-i18n="cmd.contextUsage">Context usage</span></div>
+                        <div class="cmd-item" onclick="requestMcpStatus()">🔌 <span data-i18n="cmd.mcpStatus">MCP status</span></div>
+                        <div class="cmd-item" onclick="requestBuildErrors()">🔨 <span data-i18n="cmd.sendBuildErrors">Send build errors</span></div>
+                        <div class="cmd-item" onclick="checkBackgroundTasks()">⏱ <span data-i18n="cmd.checkBg">Check background tasks</span></div>
+                        <div class="cmd-item" onclick="requestDoctor()">🩺 <span data-i18n="cmd.doctor">Doctor</span></div>
+                        <div class="cmd-item" onclick="reauthenticate()">🔑 <span data-i18n="cmd.reauth">Re-authenticate…</span></div>
+                        <div class="cmd-item" onclick="openSideQuestionCard()">💬 <span data-i18n="cmd.sideQuestion">Side question</span></div>
+                        <div class="cmd-item" onclick="exportChatToMarkdown()">⤓ <span data-i18n="cmd.export">Export to Markdown</span></div>
                         <div class="cmd-divider"></div>
-                        <div class="cmd-section">Custom</div>
+                        <div class="cmd-section" data-i18n="cmd.custom">Custom</div>
                         <div id="custom-cmd-list"></div>
-                        <div class="cmd-item cmd-add" onclick="openAddCommand()">＋ Add command…</div>
+                        <div class="cmd-item cmd-add" onclick="openAddCommand()">＋ <span data-i18n="cmd.addCommand">Add command…</span></div>
                     </div>
                 </div>
                 <div class="cmd-wrap" id="settings-wrap">
-                    <button class="cmd-trigger" title="Settings" onclick="toggleSettings()">⚙</button>
+                    <button class="cmd-trigger" data-i18n-title="top.settings" title="Settings" onclick="toggleSettings()">⚙</button>
                     <div class="cmd-menu settings-menu" id="settings-menu">
                         <div class="settings-search-wrap">
-                            <input type="text" id="settings-search" class="settings-input settings-search" placeholder="Search settings…"
+                            <input type="text" id="settings-search" class="settings-input settings-search" data-i18n-placeholder="settings.search" placeholder="Search settings…"
                                 oninput="filterSettings()"
                                 onkeydown="if(event.key==='Escape'&&this.value){event.stopPropagation();this.value='';filterSettings();}" />
-                            <button type="button" class="settings-input-clear settings-search-clear" title="Clear" onclick="clearSettingsSearch()">✕</button>
+                            <button type="button" class="settings-input-clear settings-search-clear" data-i18n-title="common.clear" title="Clear" onclick="clearSettingsSearch()">✕</button>
                         </div>
-                        <div class="settings-search-empty" id="settings-search-empty" hidden>No matching settings</div>
-                        <div class="cmd-section">Appearance</div>
+                        <div class="settings-search-empty" id="settings-search-empty" hidden data-i18n="settings.noMatch">No matching settings</div>
+                        <div class="cmd-section" data-i18n="settings.sec.appearance">Appearance</div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Theme
-                                <span class="info-icon" title="Chat theme. Auto follows the Visual Studio theme; Dark/Light force one regardless of VS.">ⓘ</span>
+                                <span data-i18n="settings.theme">Theme</span>
+                                <span class="info-icon" data-i18n-title="settings.theme.hint" title="Chat theme. Auto follows the Visual Studio theme; Dark/Light force one regardless of VS.">ⓘ</span>
                             </span>
                             <select id="theme-override" class="settings-select" onchange="setThemeOverride(this.value)">
-                                <option value="auto">Auto (follow VS)</option>
-                                <option value="dark">Dark</option>
-                                <option value="light">Light</option>
+                                <option value="auto" data-i18n="settings.theme.auto">Auto (follow VS)</option>
+                                <option value="dark" data-i18n="settings.theme.dark">Dark</option>
+                                <option value="light" data-i18n="settings.theme.light">Light</option>
                             </select>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Accent color
-                                <span class="info-icon" title="Accent used for buttons, links and highlights across the chat. ↶ restores the default.">ⓘ</span>
+                                <span data-i18n="settings.language">Language</span>
+                                <span class="info-icon" data-i18n-title="settings.language.hint" title="Chat panel language. Auto follows the Visual Studio UI language.">ⓘ</span>
+                            </span>
+                            <select id="ui-language" class="settings-select" onchange="setUiLanguage(this.value)">
+                                <option value="auto" data-i18n="settings.language.auto">Auto (follow Visual Studio)</option>
+                                <option value="en">English</option>
+                                <option value="tr">Türkçe</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                <span data-i18n="settings.accents">Colored accents</span>
+                                <span class="info-icon" data-i18n-title="settings.accents.hint" title="Off: buttons, your message bubbles, links and highlights use a neutral gray instead of the accent color.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="accent-enabled-toggle" checked onchange="setAccentEnabled(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                <span data-i18n="settings.accentColor">Accent color</span>
+                                <span class="info-icon" data-i18n-title="settings.accentColor.hint" title="Accent used for buttons, links and highlights across the chat. ↶ restores the default.">ⓘ</span>
                             </span>
                             <div class="settings-color-group">
                                 <input type="color" id="accent-custom" class="settings-color" oninput="setAccentCustom(this.value)" />
-                                <button type="button" class="settings-color-reset" title="Reset to default" onclick="resetAccent()">↶</button>
+                                <button type="button" class="settings-color-reset" data-i18n-title="settings.resetDefault" title="Reset to default" onclick="resetAccent()">↶</button>
                             </div>
                         </div>
                         <div class="cmd-divider"></div>
-                        <div class="cmd-section">Chat</div>
+                        <div class="cmd-section" data-i18n="settings.sec.chat">Chat</div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Auto-resume last session
-                                <span class="info-icon" title="When the chat reloads (tab switch, VS restart), automatically resume the most recent session for this workspace.">ⓘ</span>
+                                <span data-i18n="settings.autoResume">Auto-resume last session</span>
+                                <span class="info-icon" data-i18n-title="settings.autoResume.hint" title="When the chat reloads (tab switch, VS restart), automatically resume the most recent session for this workspace.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="auto-resume-toggle" onchange="setAutoResume(this.checked)" />
@@ -145,8 +169,8 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Send with Enter
-                                <span class="info-icon" title="On: Enter sends, Shift+Enter inserts a newline. Off: Enter inserts a newline, Shift+Enter sends.">ⓘ</span>
+                                <span data-i18n="settings.sendEnter">Send with Enter</span>
+                                <span class="info-icon" data-i18n-title="settings.sendEnter.hint" title="On: Enter sends, Shift+Enter inserts a newline. Off: Enter inserts a newline, Shift+Enter sends.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="send-enter-toggle" checked onchange="setSendWithEnter(this.checked)" />
@@ -155,18 +179,18 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Question picker
-                                <span class="info-icon" title="How the AskUserQuestion picker submits. Instant: a single-choice question sends on click. Always Submit: never sends on click — click an option to toggle it, and combine it with your own text in Other.">ⓘ</span>
+                                <span data-i18n="settings.askMode">Question picker</span>
+                                <span class="info-icon" data-i18n-title="settings.askMode.hint" title="How the AskUserQuestion picker submits. Instant: a single-choice question sends on click. Always Submit: never sends on click — click an option to toggle it, and combine it with your own text in Other.">ⓘ</span>
                             </span>
                             <select id="ask-mode" class="settings-select" onchange="setAskMode(this.value)">
-                                <option value="instant">Instant (send on click)</option>
-                                <option value="always">Always show Submit</option>
+                                <option value="instant" data-i18n="settings.askMode.instant">Instant (send on click)</option>
+                                <option value="always" data-i18n="settings.askMode.always">Always show Submit</option>
                             </select>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Auto-include attachments
-                                <span class="info-icon" title="When on, attached files are sent to Claude automatically, skipping the per-file 'read this file?' confirmation. You can still drop one with its × chip before sending.">ⓘ</span>
+                                <span data-i18n="settings.autoAttach">Auto-include attachments</span>
+                                <span class="info-icon" data-i18n-title="settings.autoAttach.hint" title="When on, attached files are sent to Claude automatically, skipping the per-file 'read this file?' confirmation. You can still drop one with its × chip before sending.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="auto-attach-toggle" onchange="setAutoIncludeAttachments(this.checked)" />
@@ -175,8 +199,8 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Sound when input needed
-                                <span class="info-icon" title="Plays a sound whenever claude is blocked waiting on you — a permission prompt or a question.">ⓘ</span>
+                                <span data-i18n="settings.soundInput">Sound when input needed</span>
+                                <span class="info-icon" data-i18n-title="settings.soundInput.hint" title="Plays a sound whenever claude is blocked waiting on you — a permission prompt or a question.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="sound-input-toggle" onchange="setSoundOnInput(this.checked)" />
@@ -185,8 +209,8 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Sound when turn ends
-                                <span class="info-icon" title="Plays a soft sound when a turn finishes while the tool window is hidden.">ⓘ</span>
+                                <span data-i18n="settings.soundDone">Sound when turn ends</span>
+                                <span class="info-icon" data-i18n-title="settings.soundDone.hint" title="Plays a soft sound when a turn finishes while the tool window is hidden.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="sound-done-toggle" onchange="setSoundOnDone(this.checked)" />
@@ -195,21 +219,21 @@
                         </div>
                         <div class="settings-row effort-row">
                             <span class="settings-label">
-                                Auto-save before send
-                                <span class="info-icon" title="Save documents before each send: none = never, active = the active document only, all = all open documents.">ⓘ</span>
+                                <span data-i18n="settings.autoSave">Auto-save before send</span>
+                                <span class="info-icon" data-i18n-title="settings.autoSave.hint" title="Save documents before each send: none = never, active = the active document only, all = all open documents.">ⓘ</span>
                             </span>
                             <span class="effort-value-label" id="autosave-label">active</span>
                         </div>
                         <div class="effort-slider-wrap">
                             <input type="range" class="effort-slider" id="autosave-slider" min="0" max="2" step="1" value="1" />
                             <div class="effort-ticks">
-                                <span>none</span><span>active</span><span>all</span>
+                                <span data-i18n="autosave.none">none</span><span data-i18n="autosave.active">active</span><span data-i18n="autosave.all">all</span>
                             </div>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Auto-send build errors
-                                <span class="info-icon" title="When a Visual Studio build finishes with errors, automatically send them to Claude to fix. Skipped while a turn is running; an identical error set is not re-sent twice in a row. The ⌘ menu has an on-demand version that always works.">ⓘ</span>
+                                <span data-i18n="settings.autoBuild">Auto-send build errors</span>
+                                <span class="info-icon" data-i18n-title="settings.autoBuild.hint" title="When a Visual Studio build finishes with errors, automatically send them to Claude to fix. Skipped while a turn is running; an identical error set is not re-sent twice in a row. The ⌘ menu has an on-demand version that always works.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="build-errors-toggle" onchange="setAutoSendBuildErrors(this.checked)" />
@@ -217,11 +241,11 @@
                             </label>
                         </div>
                         <div class="cmd-divider"></div>
-                        <div class="cmd-section">Display</div>
+                        <div class="cmd-section" data-i18n="settings.sec.display">Display</div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Show tokens
-                                <span class="info-icon" title="Show token usage (input/output) under each response.">ⓘ</span>
+                                <span data-i18n="settings.showTokens">Show tokens</span>
+                                <span class="info-icon" data-i18n-title="settings.showTokens.hint" title="Show token usage (input/output) under each response.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="tokens-toggle" checked onchange="setShowTokens(this.checked)" />
@@ -230,8 +254,8 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Show token estimate
-                                <span class="info-icon" title="This is an approximate token cost for the message before sending. It's just a heuristic simulation (chars / 3.5 or 5) and may differ from the actual value charged by the API.">ⓘ</span>
+                                <span data-i18n="settings.tokenEstimate">Show token estimate</span>
+                                <span class="info-icon" data-i18n-title="settings.tokenEstimate.hint" title="This is an approximate token cost for the message before sending. It's just a heuristic simulation (chars / 3.5 or 5) and may differ from the actual value charged by the API.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="token-estimate-toggle" onchange="setShowTokenEstimate(this.checked)" />
@@ -240,27 +264,27 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Response log
-                                <span class="info-icon" title="Detail of the ⏱ line appended after each response: full = duration + tools + tokens, simple = total duration, none = off.">ⓘ</span>
+                                <span data-i18n="settings.responseLog">Response log</span>
+                                <span class="info-icon" data-i18n-title="settings.responseLog.hint" title="Detail of the ⏱ line appended after each response: full = duration + tools + tokens, simple = total duration, none = off.">ⓘ</span>
                             </span>
                         </div>
                         <input type="hidden" id="timing-select" value="simple" />
                         <div class="timing-options">
                             <div class="timing-opt" data-value="full" onclick="setTimingMode(this)">
-                                <span class="timing-opt-name">full</span>
+                                <span class="timing-opt-name" data-i18n="timing.full">full</span>
                                 <span class="timing-opt-ex">⏱ 1.2s · 3 tools · 2k tok</span>
                             </div>
                             <div class="timing-opt" data-value="simple" onclick="setTimingMode(this)">
-                                <span class="timing-opt-name">simple</span>
+                                <span class="timing-opt-name" data-i18n="timing.simple">simple</span>
                                 <span class="timing-opt-ex">⏱ total: 1.2s</span>
                             </div>
                             <div class="timing-opt" data-value="none" onclick="setTimingMode(this)">
-                                <span class="timing-opt-name">none</span>
-                                <span class="timing-opt-ex">no log</span>
+                                <span class="timing-opt-name" data-i18n="timing.none">none</span>
+                                <span class="timing-opt-ex" data-i18n="timing.noLog">no log</span>
                             </div>
                         </div>
                         <div class="settings-row" style="padding-top:6px">
-                            <span class="settings-label">Time unit</span>
+                            <span class="settings-label" data-i18n="settings.timeUnit">Time unit</span>
                             <div class="unit-toggle">
                                 <button class="unit-btn" id="unit-ms" onclick="setTimeUnit('ms')">ms</button>
                                 <button class="unit-btn" id="unit-s" onclick="setTimeUnit('s')">s</button>
@@ -270,8 +294,8 @@
                         <div class="cmd-section">Claude Code</div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Co-author commits
-                                <span class="info-icon" title="Add Claude's Co-Authored-By trailer to commits and the attribution line to PR descriptions. Turn off to omit them. Applies to new/restarted sessions.">ⓘ</span>
+                                <span data-i18n="settings.coauthor">Co-author commits</span>
+                                <span class="info-icon" data-i18n-title="settings.coauthor.hint" title="Add Claude's Co-Authored-By trailer to commits and the attribution line to PR descriptions. Turn off to omit them. Applies to new/restarted sessions.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="coauthored-toggle" checked onchange="setCoAuthoredBy(this.checked)" />
@@ -280,8 +304,29 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Auto-compact context
-                                <span class="info-icon" title="Automatically compact the conversation when the context window fills. Applies to new/restarted sessions.">ⓘ</span>
+                                <span data-i18n="settings.defaultModel">Default model</span>
+                                <span class="info-icon" data-i18n-title="settings.defaultModel.hint" title="Model new chats start with. &quot;Last used&quot; keeps the model you picked last. Changing the model inside a chat doesn't change this.">ⓘ</span>
+                            </span>
+                            <select id="default-model-select" class="settings-select" onchange="setDefaultModel(this.value)">
+                                <option value="" data-i18n="settings.defaultModel.last">Last used</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                <span data-i18n="settings.defaultMode">Default mode</span>
+                                <span class="info-icon" data-i18n-title="settings.defaultMode.hint" title="Permission mode the panel opens in. A new chat keeps the mode you were using (Bypass permissions excepted, it falls back to this). Bypass permissions can't be the default.">ⓘ</span>
+                            </span>
+                            <select id="default-mode-select" class="settings-select" onchange="setDefaultPermissionMode(this.value)">
+                                <option value="ask" data-i18n="permMode.ask">Manual</option>
+                                <option value="acceptEdits" data-i18n="permMode.acceptEdits">Edit automatically</option>
+                                <option value="plan" data-i18n="permMode.plan">Plan</option>
+                                <option value="auto" data-i18n="permMode.auto">Auto</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                <span data-i18n="settings.autocompact">Auto-compact context</span>
+                                <span class="info-icon" data-i18n-title="settings.autocompact.hint" title="Automatically compact the conversation when the context window fills. Applies to new/restarted sessions.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="autocompact-toggle" checked onchange="setAutoCompact(this.checked)" />
@@ -290,47 +335,57 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Transcript retention (days)
-                                <span class="info-icon" title="How many days claude keeps chat transcripts before automatic cleanup. Leave blank for the default (30). Applies to new/restarted sessions.">ⓘ</span>
+                                <span data-i18n="settings.perf">Performance metrics</span>
+                                <span class="info-icon" data-i18n-title="settings.perf.hint" title="Appends per-turn timings and message counts (never prompt or response text) to %LOCALAPPDATA%\ClaudeStudio\perf.jsonl, for before/after comparisons.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="perfmetrics-toggle" onchange="setPerfMetrics(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                <span data-i18n="settings.retention">Transcript retention (days)</span>
+                                <span class="info-icon" data-i18n-title="settings.retention.hint" title="How many days claude keeps chat transcripts before automatic cleanup. Leave blank for the default (30). Applies to new/restarted sessions.">ⓘ</span>
                             </span>
                             <input type="number" id="cleanup-days-input" class="settings-number" min="1" placeholder="30" oninput="setCleanupDays(this.value)" />
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Permission rules
-                                <span class="info-icon" title="Auto-decide tool permissions with claude-style rules like Bash(git *). Allow skips the prompt, deny blocks the tool, ask always prompts. Rules apply from the next message.">ⓘ</span>
+                                <span data-i18n="settings.permRules">Permission rules</span>
+                                <span class="info-icon" data-i18n-title="settings.permRules.hint" title="Auto-decide tool permissions with claude-style rules like Bash(git *). Allow skips the prompt, deny blocks the tool, ask always prompts. Rules apply from the next message.">ⓘ</span>
                             </span>
-                            <button type="button" class="settings-manage-btn" onclick="openPermRulesModal()">Manage…</button>
+                            <button type="button" class="settings-manage-btn" onclick="openPermRulesModal()" data-i18n="settings.manage">Manage…</button>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Unanswered permission
-                                <span class="info-icon" title="How long a permission prompt waits before it is denied for you. The default holds the turn while you decide, up to one hour — one hour is the ceiling because past that the underlying CLI hook would let the tool run unapproved, so it is a hard limit, not a soft one. A shorter timeout denies sooner; cancelling the turn always releases it immediately.">ⓘ</span>
+                                <span data-i18n="settings.permTimeout">Unanswered permission</span>
+                                <span class="info-icon" data-i18n-title="settings.permTimeout.hint" title="How long a permission prompt waits before it is denied for you. The default holds the turn while you decide, up to one hour — one hour is the ceiling because past that the underlying CLI hook would let the tool run unapproved, so it is a hard limit, not a soft one. A shorter timeout denies sooner; cancelling the turn always releases it immediately.">ⓘ</span>
                             </span>
                             <select id="perm-timeout-select" class="settings-select" onchange="setPermissionTimeout(this.value)">
-                                <option value="0">Wait for answer (max 1 hour)</option>
-                                <option value="3">Deny after 3 min</option>
-                                <option value="10">Deny after 10 min</option>
-                                <option value="30">Deny after 30 min</option>
+                                <option value="0" data-i18n="settings.permTimeout.0">Wait for answer (max 1 hour)</option>
+                                <option value="3" data-i18n="settings.permTimeout.3">Deny after 3 min</option>
+                                <option value="10" data-i18n="settings.permTimeout.10">Deny after 10 min</option>
+                                <option value="30" data-i18n="settings.permTimeout.30">Deny after 30 min</option>
                             </select>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                CLI path
-                                <span class="info-icon" title="Full path to claude.exe (or its folder) when it isn't on your PATH — custom installs. Leave blank to auto-detect. Applies to new/restarted sessions.">ⓘ</span>
+                                <span data-i18n="settings.cliPath">CLI path</span>
+                                <span class="info-icon" data-i18n-title="settings.cliPath.hint" title="Full path to claude.exe (or its folder) when it isn't on your PATH — custom installs. Leave blank to auto-detect. Applies to new/restarted sessions.">ⓘ</span>
                             </span>
                         </div>
                         <div class="settings-input-wrap">
-                            <input type="text" id="cli-path-input" class="settings-input" placeholder="Auto (PATH + standard locations)" oninput="setCliPath(this.value)" />
-                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearCliPath()">✕</button>
+                            <input type="text" id="cli-path-input" class="settings-input" data-i18n-placeholder="settings.cliPath.placeholder" placeholder="Auto (PATH + standard locations)" oninput="setCliPath(this.value)" />
+                            <button type="button" class="settings-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearCliPath()">✕</button>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Fallback model
-                                <span class="info-icon" title="Automatically retry on this model when the primary one is overloaded or unavailable. Applies to new/restarted sessions.">ⓘ</span>
+                                <span data-i18n="settings.fallback">Fallback model</span>
+                                <span class="info-icon" data-i18n-title="settings.fallback.hint" title="Automatically retry on this model when the primary one is overloaded or unavailable. Applies to new/restarted sessions.">ⓘ</span>
                             </span>
                             <select id="fallback-model-select" class="settings-select" onchange="setFallbackModel(this.value)">
-                                <option value="">Off</option>
+                                <option value="" data-i18n="common.off">Off</option>
                                 <option value="claude-sonnet-5-5">Sonnet 5.5</option>
                                 <option value="claude-sonnet-5">Sonnet 5</option>
                                 <option value="claude-sonnet-4-6">Sonnet 4.6</option>
@@ -345,97 +400,97 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Subagent detail
-                                <span class="info-icon" title="How much of a subagent's (Task/Agent tool) work to show live under its chip while it runs. Off: just the chip. Simple: a one-line status. Full: thinking, text, and its own tool calls, nested.">ⓘ</span>
+                                <span data-i18n="settings.subagent">Subagent detail</span>
+                                <span class="info-icon" data-i18n-title="settings.subagent.hint" title="How much of a subagent's (Task/Agent tool) work to show live under its chip while it runs. Off: just the chip. Simple: a one-line status. Full: thinking, text, and its own tool calls, nested.">ⓘ</span>
                             </span>
                             <select id="subagent-detail-select" class="settings-select" onchange="setSubagentDetail(this.value)">
-                                <option value="off">Off</option>
-                                <option value="simple">Simple</option>
-                                <option value="full">Full</option>
+                                <option value="off" data-i18n="common.off">Off</option>
+                                <option value="simple" data-i18n="settings.subagent.simple">Simple</option>
+                                <option value="full" data-i18n="settings.subagent.full">Full</option>
                             </select>
                         </div>
                         <div class="cmd-divider"></div>
-                        <div class="cmd-section">Workspace</div>
+                        <div class="cmd-section" data-i18n="settings.sec.workspace">Workspace</div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Working directory
-                                <span class="info-icon" title="Folder where claude runs. Leave blank to auto-resolve (solution → open folder → active document). Saved per solution — switching solutions won't carry it over. Changing it restarts the session.">ⓘ</span>
+                                <span data-i18n="settings.workdir">Working directory</span>
+                                <span class="info-icon" data-i18n-title="settings.workdir.hint" title="Folder where claude runs. Leave blank to auto-resolve (solution → open folder → active document). Saved per solution — switching solutions won't carry it over. Changing it restarts the session.">ⓘ</span>
                             </span>
                             <div class="inline-toggle-wrap">
-                                <span class="inline-toggle-label">Show</span>
-                                <label class="toggle" title="Show working directory bar">
+                                <span class="inline-toggle-label" data-i18n="settings.show">Show</span>
+                                <label class="toggle" data-i18n-title="settings.workdir.showBar" title="Show working directory bar">
                                     <input type="checkbox" id="cwdbar-toggle" checked onchange="setShowCwdbar(this.checked)" />
                                     <span class="toggle-track"></span>
                                 </label>
                             </div>
                         </div>
                         <div class="settings-input-wrap">
-                            <input type="text" id="working-dir-input" class="settings-input" placeholder="Auto (solution directory)" oninput="setWorkingDirectory(this.value)" />
-                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearWorkingDirectory()">✕</button>
+                            <input type="text" id="working-dir-input" class="settings-input" data-i18n-placeholder="settings.workdir.placeholder" placeholder="Auto (solution directory)" oninput="setWorkingDirectory(this.value)" />
+                            <button type="button" class="settings-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearWorkingDirectory()">✕</button>
                         </div>
 
                         <div class="settings-row">
                             <span class="settings-label">
-                                Titlebar name
-                                <span class="info-icon" title="What the titlebar shows next to the plan. Auto picks the first available: organization → account name → email.">ⓘ</span>
+                                <span data-i18n="settings.titlebar">Titlebar name</span>
+                                <span class="info-icon" data-i18n-title="settings.titlebar.hint" title="What the titlebar shows next to the plan. Auto picks the first available: organization → account name → email.">ⓘ</span>
                             </span>
                             <select id="account-info-source" class="settings-select" onchange="setAccountInfoSource(this.value)">
-                                <option value="auto">Auto (cascade)</option>
-                                <option value="account">Account name</option>
-                                <option value="organization">Organization</option>
-                                <option value="email">Email</option>
-                                <option value="custom">Custom</option>
+                                <option value="auto" data-i18n="settings.titlebar.auto">Auto (cascade)</option>
+                                <option value="account" data-i18n="settings.titlebar.account">Account name</option>
+                                <option value="organization" data-i18n="settings.titlebar.organization">Organization</option>
+                                <option value="email" data-i18n="settings.titlebar.email">Email</option>
+                                <option value="custom" data-i18n="settings.titlebar.custom">Custom</option>
                             </select>
                         </div>
                         <div class="settings-input-wrap">
-                            <input type="text" id="display-name-input" class="settings-input" placeholder="Custom name (used when 'Custom' is selected or as cascade fallback)" oninput="setDisplayName(this.value)" />
-                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearDisplayName()">✕</button>
+                            <input type="text" id="display-name-input" class="settings-input" data-i18n-placeholder="settings.titlebar.placeholder" placeholder="Custom name (used when 'Custom' is selected or as cascade fallback)" oninput="setDisplayName(this.value)" />
+                            <button type="button" class="settings-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearDisplayName()">✕</button>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Status line command
-                                <span class="info-icon" title="Command run in the working directory whose first lines show in a bar under the header — e.g. git status -sb. Refreshes after each turn. Leave blank to disable.">ⓘ</span>
+                                <span data-i18n="settings.statusLine">Status line command</span>
+                                <span class="info-icon" data-i18n-title="settings.statusLine.hint" title="Command run in the working directory whose first lines show in a bar under the header — e.g. git status -sb. Refreshes after each turn. Leave blank to disable.">ⓘ</span>
                             </span>
                         </div>
                         <div class="settings-input-wrap">
                             <input type="text" id="status-line-input" class="settings-input" placeholder="git status -sb" oninput="setStatusLineCommand(this.value)" />
-                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearStatusLineCommand()">✕</button>
+                            <button type="button" class="settings-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearStatusLineCommand()">✕</button>
                         </div>
 
                         <div class="cmd-divider"></div>
-                        <div class="cmd-section">Cost limits</div>
+                        <div class="cmd-section" data-i18n="settings.sec.cost">Cost limits</div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Cost limit warning ($)
-                                <span class="info-icon" title="Show a warning when the estimated cost of the current session or day crosses these USD values. Leave blank to disable.">ⓘ</span>
+                                <span data-i18n="settings.costWarn">Cost limit warning ($)</span>
+                                <span class="info-icon" data-i18n-title="settings.costWarn.hint" title="Show a warning when the estimated cost of the current session or day crosses these USD values. Leave blank to disable.">ⓘ</span>
                             </span>
                         </div>
                         <div class="cost-limits-row">
                             <label class="cost-limit-field">
-                                <span>Session</span>
+                                <span data-i18n="settings.cost.session">Session</span>
                                 <div class="cost-limit-input-wrap">
-                                    <input type="text" inputmode="decimal" id="cost-session-input" class="settings-input" placeholder="off"
+                                    <input type="text" inputmode="decimal" id="cost-session-input" class="settings-input" data-i18n-placeholder="common.offLower" placeholder="off"
                                         oninput="setCostLimit('session', this.value)"
                                         onblur="formatCostLimitInput(this)"
                                         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
-                                    <button type="button" class="cost-input-clear" title="Clear" onclick="clearCostLimit('session')">✕</button>
+                                    <button type="button" class="cost-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearCostLimit('session')">✕</button>
                                 </div>
                             </label>
                             <label class="cost-limit-field">
-                                <span>Day</span>
+                                <span data-i18n="settings.cost.day">Day</span>
                                 <div class="cost-limit-input-wrap">
-                                    <input type="text" inputmode="decimal" id="cost-daily-input" class="settings-input" placeholder="off"
+                                    <input type="text" inputmode="decimal" id="cost-daily-input" class="settings-input" data-i18n-placeholder="common.offLower" placeholder="off"
                                         oninput="setCostLimit('daily', this.value)"
                                         onblur="formatCostLimitInput(this)"
                                         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
-                                    <button type="button" class="cost-input-clear" title="Clear" onclick="clearCostLimit('daily')">✕</button>
+                                    <button type="button" class="cost-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearCostLimit('daily')">✕</button>
                                 </div>
                             </label>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Block sending when reached
-                                <span class="info-icon" title="While a limit is exceeded, also block sending new messages instead of only warning.">ⓘ</span>
+                                <span data-i18n="settings.costBlock">Block sending when reached</span>
+                                <span class="info-icon" data-i18n-title="settings.costBlock.hint" title="While a limit is exceeded, also block sending new messages instead of only warning.">ⓘ</span>
                             </span>
                             <label class="toggle">
                                 <input type="checkbox" id="cost-block-toggle" onchange="setCostBlock(this.checked)" />
@@ -444,29 +499,29 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Hard budget per session ($)
-                                <span class="info-icon" title="CLI-enforced (--max-budget-usd): unlike the warning above, this actually ends the session once claude's own tracked spend crosses it. Leave blank to disable.">ⓘ</span>
+                                <span data-i18n="settings.maxBudget">Hard budget per session ($)</span>
+                                <span class="info-icon" data-i18n-title="settings.maxBudget.hint" title="CLI-enforced (--max-budget-usd): unlike the warning above, this actually ends the session once claude's own tracked spend crosses it. Leave blank to disable.">ⓘ</span>
                             </span>
                         </div>
                         <div class="settings-input-wrap">
-                            <input type="text" inputmode="decimal" id="max-budget-input" class="settings-input" placeholder="off"
+                            <input type="text" inputmode="decimal" id="max-budget-input" class="settings-input" data-i18n-placeholder="common.offLower" placeholder="off"
                                 oninput="setMaxBudget(this.value)"
                                 onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
-                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearMaxBudget()">✕</button>
+                            <button type="button" class="settings-input-clear" data-i18n-title="common.clear" title="Clear" onclick="clearMaxBudget()">✕</button>
                         </div>
                         <div class="cmd-divider"></div>
                         <div class="settings-row">
                             <span class="settings-label">
-                                Reset settings
-                                <span class="info-icon" title="Restore every setting in this panel to its default, including permission rules, cost limits and per-solution working directories. Prompt history and session data are kept; the chat view reloads.">ⓘ</span>
+                                <span data-i18n="settings.reset">Reset settings</span>
+                                <span class="info-icon" data-i18n-title="settings.reset.hint" title="Restore every setting in this panel to its default, including permission rules, cost limits and per-solution working directories. Prompt history and session data are kept; the chat view reloads.">ⓘ</span>
                             </span>
-                            <button type="button" class="settings-manage-btn" onclick="resetSettingsToDefaults()">Reset…</button>
+                            <button type="button" class="settings-manage-btn" onclick="resetSettingsToDefaults()" data-i18n="settings.reset.button">Reset…</button>
                         </div>
 
                         <div class="about-section">
                             <div class="about-name"><span class="logo">✺</span> Claude Code Studio</div>
                             <div class="about-meta">v— · wluisdev</div>
-                            <div class="about-desc">Claude Code integration for Visual Studio 2022</div>
+                            <div class="about-desc" data-i18n="about.desc">Claude Code integration for Visual Studio 2022</div>
                         </div>
                     </div>
                 </div>
@@ -486,20 +541,13 @@
                     <option value="claude-opus-5-5"           title="Opus 5.5 · claude-opus-5-5">Opus 5.5</option>
                     <option value="claude-opus-5"             title="Opus 5 · claude-opus-5">Opus 5</option>
                     <option value="claude-opus-4-8"           title="Opus 4.8 · claude-opus-4-8">Opus 4.8</option>
-                    <option value="opusplan"                  title="Opus Plan · opusplan — Opus while planning, Sonnet for execution">Opus Plan</option>
+                    <option value="opusplan"                  data-i18n-title="model.opusplanTitle" title="Opus Plan · opusplan — Opus while planning, Sonnet for execution">Opus Plan</option>
                     <option value="claude-fable-5-2"          title="Fable 5.2 · claude-fable-5-2">Fable 5.2</option>
                     <option value="claude-fable-5-1"          title="Fable 5.1 · claude-fable-5-1">Fable 5.1</option>
                     <option value="claude-fable-5"            title="Fable 5 · claude-fable-5">Fable 5</option>
                     <option value="claude-haiku-4-5" title="Haiku 4.5 · claude-haiku-4-5">Haiku 4.5</option>
                 </select>
-                <div class="model-control" id="model-control">
-                    <button type="button" class="effort-btn" id="model-btn" onclick="toggleModelPopup()" title="Model">
-                        <span id="model-btn-label">Sonnet 5</span>
-                        <span class="effort-btn-caret">▾</span>
-                    </button>
-                    <div class="permission-popup model-popup" id="model-popup" hidden></div>
-                </div>
-                <button class="new-chat" title="New chat">✎</button>
+                <button class="new-chat" data-i18n-title="titlebar.newChat" title="New chat">✎</button>
             </div>
         </div>
 
@@ -516,13 +564,13 @@
 
         <div class="content">
             <div id="find-bar" class="find-bar">
-                <input type="text" id="find-input" placeholder="Find in chat…" />
+                <input type="text" id="find-input" data-i18n-placeholder="find.placeholder" placeholder="Find in chat…" />
                 <span id="find-count" class="find-count">0/0</span>
-                <button class="find-btn" onclick="findPrev()" title="Previous (Shift+Enter)">▲</button>
-                <button class="find-btn" onclick="findNext()" title="Next (Enter)">▼</button>
-                <button class="find-btn" onclick="closeFindBar()" title="Close (Esc)">✕</button>
+                <button class="find-btn" onclick="findPrev()" data-i18n-title="find.prev" title="Previous (Shift+Enter)">▲</button>
+                <button class="find-btn" onclick="findNext()" data-i18n-title="find.next" title="Next (Enter)">▼</button>
+                <button class="find-btn" onclick="closeFindBar()" data-i18n-title="find.close" title="Close (Esc)">✕</button>
             </div>
-            <button class="scroll-bottom" id="btn-scroll-bottom" title="Scroll to bottom" onclick="scrollToBottom()">↓</button>
+            <button class="scroll-bottom" id="btn-scroll-bottom" data-i18n-title="chat.scrollBottom" title="Scroll to bottom" onclick="scrollToBottom()">↓</button>
             <div id="messages" class="messages">
 
                 <div class="welcome">
@@ -551,27 +599,51 @@
             <button class="notice-close" onclick="dismissCostWarning()">×</button>
         </div>
 
-        <div class="splitter" id="splitter" title="Drag to resize composer"></div>
+        <div class="splitter" id="splitter" data-i18n-title="chat.splitter" title="Drag to resize composer"></div>
 
         <div class="composer">
+            <div id="send-queue" class="attachments send-queue" title="Sent when the current turn finishes, or right away when you press ■" data-i18n-title="queue.hint"></div>
             <div id="attachments" class="attachments"></div>
             <div class="input">
                 <div class="cmd-autocomplete" id="cmd-autocomplete"></div>
                 <div class="cmd-autocomplete at-autocomplete" id="at-autocomplete"></div>
-                <textarea placeholder="Ctrl+Shift+J to focus · Esc to unfocus · @ to reference a file"></textarea>
+                <textarea data-i18n-placeholder="composer.placeholder" placeholder="Ctrl+Shift+J to focus · Esc to unfocus · @ to reference a file"></textarea>
 
                 <div class="composer-actions">
                     <div class="left-buttons">
-                        <button class="composer-btn" id="btn-paste" title="Paste from clipboard">⎘</button>
-                        <button class="composer-btn" id="btn-file" title="Add file">＋</button>
-                        <button class="composer-btn" id="btn-selection" title="Insert editor selection">▣</button>
+                        <div class="attach-control" id="attach-control">
+                            <button type="button" class="composer-btn" id="btn-attach" onclick="toggleAttachMenu()" data-i18n-title="composer.attach" title="Add…">＋</button>
+                            <div class="permission-popup attach-popup" id="attach-popup" hidden>
+                                <button type="button" class="permission-item" id="btn-file"><span class="attach-icon">＋</span><span data-i18n="composer.addFile">Add file</span></button>
+                                <button type="button" class="permission-item" id="btn-paste"><span class="attach-icon">⎘</span><span data-i18n="composer.paste">Paste from clipboard</span></button>
+                                <button type="button" class="permission-item" id="btn-selection"><span class="attach-icon">▣</span><span data-i18n="composer.selection">Insert editor selection</span></button>
+                            </div>
+                        </div>
+                        <button type="button" class="composer-btn composer-slash" id="btn-slash" onclick="openSlashCommands()" data-i18n-title="composer.commands" title="Slash commands">/</button>
+                        <button type="button" class="ctx-ring" id="ctx-ring" onclick="compactNow()" data-i18n-title="composer.contextUnknown" title="Context usage shows after the first reply.">
+                            <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle class="ctx-ring-track" cx="10" cy="10" r="8"></circle><circle class="ctx-ring-fill" id="ctx-ring-fill" cx="10" cy="10" r="8"></circle></svg>
+                            <span id="ctx-ring-pct"></span>
+                        </button>
+                        <button type="button" class="rc-pill" id="rc-btn" data-state="off" onclick="toggleRemoteControl()"><span class="rc-dot"></span><span data-i18n="rc.label">Remote Control</span></button>
+                        <div class="agents-control" id="agents-control" hidden>
+                            <button type="button" class="rc-pill agents-pill" id="agents-btn" onclick="toggleAgentsPopup()"><span class="rc-dot"></span><span id="agents-label"></span></button>
+                            <div class="permission-popup agents-popup" id="agents-popup" hidden></div>
+                        </div>
                     </div>
 
                     <div class="right-buttons">
                         <span class="history-hint" id="history-hint" hidden></span>
-                        <span class="token-estimate" id="token-estimate" title="Approximate input tokens"></span>
+                        <span class="token-estimate" id="token-estimate" data-i18n-title="composer.tokenEstimate" title="Approximate input tokens"></span>
+                        <div class="model-effort-pill">
+                        <div class="model-control" id="model-control">
+                            <button type="button" class="effort-btn" id="model-btn" onclick="toggleModelPopup()" title="Model">
+                                <span id="model-btn-label">Sonnet 5</span>
+                            </button>
+                            <div class="permission-popup" id="model-popup" hidden></div>
+                        </div>
+                        <span class="pill-sep">·</span>
                         <div class="effort-control" id="effort-control">
-                            <button type="button" class="effort-btn" id="effort-btn" onclick="toggleEffortPopup()" title="Reasoning effort">
+                            <button type="button" class="effort-btn" id="effort-btn" onclick="toggleEffortPopup()" data-i18n-title="composer.effort" title="Reasoning effort">
                                 <span id="effort-btn-icon">🧭</span>
                                 <span id="effort-btn-label">auto</span>
                                 <span class="effort-btn-caret">▴</span>
@@ -579,21 +651,45 @@
                             <div class="effort-popup" id="effort-popup" hidden>
                                 <input type="range" class="effort-popup-slider" id="effort-popup-slider" min="0" max="5" step="1" value="0" />
                                 <div class="effort-popup-ticks">
-                                    <span>auto</span><span>low</span><span>med</span><span>high</span><span>xhigh</span><span>max</span>
+                                    <span data-i18n="effort.auto">auto</span><span data-i18n="effort.low">low</span><span data-i18n="effort.med">med</span><span data-i18n="effort.high">high</span><span data-i18n="effort.xhigh">xhigh</span><span data-i18n="effort.max">max</span>
                                 </div>
                             </div>
                         </div>
+                        </div>
                         <div class="permission-control" id="permission-control">
-                            <button type="button" class="effort-btn" id="permission-btn" onclick="togglePermissionPopup()" title="Permission mode">
-                                <span id="permission-btn-icon">🔒</span>
-                                <span id="permission-btn-label">ask</span>
+                            <button type="button" class="effort-btn" id="permission-btn" onclick="togglePermissionPopup()" data-i18n-title="composer.permission" title="Permission mode">
+                                <span id="permission-btn-icon">✋</span>
+                                <span id="permission-btn-label">Manual</span>
                                 <span class="effort-btn-caret">▴</span>
                             </button>
-                            <div class="permission-popup" id="permission-popup" hidden>
-                                <button type="button" class="permission-item" data-value="ask" onclick="setPermission('ask')" title="ask — Claude default"><span>🔒</span><span>ask</span></button>
-                                <button type="button" class="permission-item" data-value="plan" onclick="setPermission('plan')" title="plan — plans only"><span>📋</span><span>plan</span></button>
-                                <button type="button" class="permission-item" data-value="dontAsk" onclick="setPermission('dontAsk')" title="dontAsk — read-only: reads/searches run freely, all edits/writes are blocked (not prompted, refused)"><span>🔕</span><span>dontAsk</span></button>
-                                <button type="button" class="permission-item" data-value="yolo" onclick="setPermission('yolo')" title="yolo — skips ALL permission prompts (dangerous)"><span>⚡</span><span>yolo</span></button>
+                            <div class="permission-popup mode-popup" id="permission-popup" hidden>
+                                <div class="mode-popup-header" data-i18n="permMode.header">Modes</div>
+                                <button type="button" class="permission-item mode-item" data-value="ask" onclick="setPermission('ask')">
+                                    <span class="mode-icon">✋</span>
+                                    <span class="mode-text"><span class="mode-title" data-i18n="permMode.ask">Manual</span><span class="mode-desc" data-i18n="permMode.ask.desc">Claude will ask for approval before making each edit or running a command.</span></span>
+                                    <span class="mode-check">✓</span>
+                                </button>
+                                <button type="button" class="permission-item mode-item" data-value="acceptEdits" onclick="setPermission('acceptEdits')">
+                                    <span class="mode-icon">✏️</span>
+                                    <span class="mode-text"><span class="mode-title" data-i18n="permMode.acceptEdits">Edit automatically</span><span class="mode-desc" data-i18n="permMode.acceptEdits.desc">Claude will edit files in the workspace without asking. Commands still need your approval.</span></span>
+                                    <span class="mode-check">✓</span>
+                                </button>
+                                <button type="button" class="permission-item mode-item" data-value="plan" onclick="setPermission('plan')">
+                                    <span class="mode-icon">📋</span>
+                                    <span class="mode-text"><span class="mode-title" data-i18n="permMode.plan">Plan</span><span class="mode-desc" data-i18n="permMode.plan.desc">Claude will explore the code and present a plan before editing.</span></span>
+                                    <span class="mode-check">✓</span>
+                                </button>
+                                <button type="button" class="permission-item mode-item" data-value="auto" onclick="setPermission('auto')">
+                                    <span class="mode-icon">⚡</span>
+                                    <span class="mode-text"><span class="mode-title" data-i18n="permMode.auto">Auto</span><span class="mode-desc" data-i18n="permMode.auto.desc">Claude will approve actions that pass a safety check and pause for anything risky.</span></span>
+                                    <span class="mode-check">✓</span>
+                                </button>
+                                <div class="mode-divider"></div>
+                                <button type="button" class="permission-item mode-item mode-danger" data-value="bypassPermissions" onclick="setPermission('bypassPermissions')">
+                                    <span class="mode-icon">⚠️</span>
+                                    <span class="mode-text"><span class="mode-title"><span data-i18n="permMode.bypass">Bypass permissions</span> <span class="mode-badge" data-i18n="permMode.dangerous">Dangerous</span></span><span class="mode-desc" data-i18n="permMode.bypass.desc">Claude will run every tool without asking: no approvals and no safety check. Edits, deletes and commands happen immediately.</span></span>
+                                    <span class="mode-check">✓</span>
+                                </button>
                             </div>
                         </div>
                         <button class="send" id="btn-send">↑</button>
@@ -606,13 +702,13 @@
     <div class="cmd-modal-overlay" id="usage-modal-overlay" onclick="if(overlayClicked(event,this))closeUsageModal()">
         <div class="cmd-modal usage-modal">
             <div class="usage-modal-header">
-                <h3>Usage</h3>
+                <h3 data-i18n="usage.title">Usage</h3>
                 <button class="usage-modal-close" onclick="closeUsageModal()">×</button>
             </div>
-            <div class="usage-raw" id="usage-raw"><span class="usage-loading">Running /usage…</span></div>
+            <div class="usage-raw" id="usage-raw"><span class="usage-loading" data-i18n="usage.running">Running /usage…</span></div>
             <div class="usage-divider"></div>
             <div class="usage-session">
-                <div class="usage-session-label">Session total</div>
+                <div class="usage-session-label" data-i18n="usage.sessionTotal">Session total</div>
                 <div class="usage-session-values" id="usage-session-values">—</div>
             </div>
         </div>
@@ -625,7 +721,7 @@
                 <button class="usage-modal-close" onclick="closeDiffModal()">×</button>
             </div>
             <div class="diff-stat" id="diff-stat"></div>
-            <div class="diff-body" id="diff-body"><span class="usage-loading">Running git diff…</span></div>
+            <div class="diff-body" id="diff-body"><span class="usage-loading" data-i18n="diff.running">Running git diff…</span></div>
         </div>
     </div>
 
@@ -637,7 +733,7 @@
                     <div class="diff-modal-subtitle" id="diff-modal-subtitle"></div>
                 </div>
                 <div class="diff-modal-header-actions">
-                    <button class="diff-modal-vs-btn" id="tool-diff-modal-vs" onclick="openVsDiff(toolDiffModalFile, toolDiffModalTool)">Abrir no VS</button>
+                    <button class="diff-modal-vs-btn" id="tool-diff-modal-vs" onclick="openVsDiff(toolDiffModalFile, toolDiffModalTool)" data-i18n="diff.openInVs">Open in VS</button>
                     <button class="diff-modal-close" onclick="closeToolDiffModal()">×</button>
                 </div>
             </div>
@@ -650,7 +746,7 @@
             <div class="perm-modal-header">
                 <span class="perm-modal-icon">🔒</span>
                 <div class="perm-modal-title">
-                    <div class="perm-modal-eyebrow">Permission requested</div>
+                    <div class="perm-modal-eyebrow" data-i18n="perm.requested">Permission requested</div>
                     <div class="perm-modal-tool" id="perm-modal-tool">Tool</div>
                 </div>
             </div>
@@ -660,9 +756,9 @@
             </div>
             <div class="perm-modal-input" id="perm-modal-input"></div>
             <div class="cmd-modal-buttons perm-modal-buttons">
-                <button class="perm-deny" onclick="permissionDeny()">Deny</button>
-                <button class="perm-allow-session" onclick="permissionAllowSession()">Allow for session</button>
-                <button class="perm-allow" onclick="permissionAllow()">Allow</button>
+                <button class="perm-deny" onclick="permissionDeny()" data-i18n="perm.deny">Deny</button>
+                <button class="perm-allow-session" onclick="permissionAllowSession()" data-i18n="perm.allowSession">Allow for session</button>
+                <button class="perm-allow" onclick="permissionAllow()" data-i18n="perm.allow">Allow</button>
             </div>
         </div>
     </div>
@@ -672,8 +768,8 @@
             <div class="trust-modal-header">
                 <span class="trust-modal-icon">⚠</span>
                 <div class="trust-modal-title">
-                    <div class="trust-modal-eyebrow">Untrusted workspace</div>
-                    <div class="trust-modal-headline">Do you trust the files in this folder?</div>
+                    <div class="trust-modal-eyebrow" data-i18n="trust.eyebrow">Untrusted workspace</div>
+                    <div class="trust-modal-headline" data-i18n="trust.headline">Do you trust the files in this folder?</div>
                 </div>
             </div>
             <div class="trust-modal-path-row">
@@ -684,18 +780,18 @@
                 <span class="trust-modal-warning-icon">⚠️</span>
                 <span class="trust-modal-warning-text" id="trust-modal-warning-text"></span>
             </div>
-            <div class="trust-modal-body">
+            <div class="trust-modal-body" data-i18n="trust.body">
                 Claude will be able to read, modify, and execute code in this folder
                 on your behalf. Trust it only if you wrote the code yourself or
                 obtained it from a source you trust.
             </div>
             <div class="trust-modal-parent" id="trust-modal-parent-row" hidden>
-                Parent: <span id="trust-modal-parent-path"></span>
+                <span data-i18n="trust.parentLabel" style="color:inherit">Parent:</span> <span id="trust-modal-parent-path"></span>
             </div>
             <div class="cmd-modal-buttons trust-modal-buttons">
-                <button class="trust-deny" onclick="trustDeny()">Don't trust</button>
+                <button class="trust-deny" onclick="trustDeny()" data-i18n="trust.deny">Don't trust</button>
                 <button class="trust-parent" id="trust-parent-btn" onclick="trustParent()">Trust parent</button>
-                <button class="trust-allow" onclick="trustAllow()">Trust</button>
+                <button class="trust-allow" onclick="trustAllow()" data-i18n="trust.allow">Trust</button>
             </div>
         </div>
     </div>
@@ -705,12 +801,12 @@
             <div class="trust-modal-header">
                 <span class="trust-modal-icon">🛡️</span>
                 <div>
-                    <div class="trust-modal-eyebrow">Permission rules</div>
-                    <div class="trust-modal-headline">Auto-decide tool permissions</div>
+                    <div class="trust-modal-eyebrow" data-i18n="settings.permRules">Permission rules</div>
+                    <div class="trust-modal-headline" data-i18n="rules.headline">Auto-decide tool permissions</div>
                 </div>
             </div>
             <div class="perm-rules-body">
-                <div class="perm-rules-hint">
+                <div class="perm-rules-hint" data-i18n-html="rules.hint">
                     Rules use claude's format: <code>Tool</code> or <code>Tool(specifier)</code>.
                     Deny wins over ask; ask wins over allow. Rules apply from the next message.
                     <b>The tool name must match exactly</b> — on Windows a shell command usually
@@ -720,57 +816,57 @@
                 </div>
                 <details class="perm-rules-examples" id="perm-rules-examples" open
                          ontoggle="window.togglePermExamples && togglePermExamples(this.open)">
-                    <summary class="perm-rules-examples-title">Examples — click one to fill the box</summary>
+                    <summary class="perm-rules-examples-title" data-i18n="rules.examples">Examples — click one to fill the box</summary>
                     <div class="perm-rules-examples-grid">
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell(git status)')">
-                        <code>PowerShell(git status)</code><span>one exact command</span></button>
+                        <code>PowerShell(git status)</code><span data-i18n="rules.ex.exact">one exact command</span></button>
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell(git *)')">
-                        <code>PowerShell(git *)</code><span>any git command</span></button>
+                        <code>PowerShell(git *)</code><span data-i18n="rules.ex.anyGit">any git command</span></button>
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','Bash(npm run test:*)')">
-                        <code>Bash(npm run test:*)</code><span>prefix — npm run test and anything after</span></button>
+                        <code>Bash(npm run test:*)</code><span data-i18n="rules.ex.prefix">prefix — npm run test and anything after</span></button>
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','Read')">
-                        <code>Read</code><span>a whole tool, no specifier</span></button>
+                        <code>Read</code><span data-i18n="rules.ex.wholeTool">a whole tool, no specifier</span></button>
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','mcp__testeLocal__soma')">
-                        <code>mcp__server__tool</code><span>one MCP tool, full name</span></button>
+                        <code>mcp__server__tool</code><span data-i18n="rules.ex.mcp">one MCP tool, full name</span></button>
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell')">
-                        <code>PowerShell</code><span>every call of that tool — no <code>*</code> needed</span></button>
+                        <code>PowerShell</code><span data-i18n-html="rules.ex.everyCall">every call of that tool — no <code>*</code> needed</span></button>
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('deny','PowerShell(git push*)')">
-                        <code>PowerShell(git push*)</code><span>good candidate for Deny</span></button>
+                        <code>PowerShell(git push*)</code><span data-i18n="rules.ex.deny">good candidate for Deny</span></button>
                     </div>
                 </details>
                 <div class="perm-rules-group">
-                    <div class="perm-rules-group-title">✅ Allow — run without asking</div>
+                    <div class="perm-rules-group-title" data-i18n="rules.allow">✅ Allow — run without asking</div>
                     <div class="perm-rules-list" id="perm-rules-allow"></div>
                     <div class="perm-rules-add">
                         <input type="text" id="perm-rules-input-allow" placeholder="PowerShell(git *)"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('allow');}" />
-                        <button type="button" onclick="addPermRule('allow')">Add</button>
+                        <button type="button" onclick="addPermRule('allow')" data-i18n="common.add">Add</button>
                     </div>
                     <div class="perm-rules-error" id="perm-rules-error-allow" hidden></div>
                 </div>
                 <div class="perm-rules-group">
-                    <div class="perm-rules-group-title">❓ Ask — always prompt</div>
+                    <div class="perm-rules-group-title" data-i18n="rules.ask">❓ Ask — always prompt</div>
                     <div class="perm-rules-list" id="perm-rules-ask"></div>
                     <div class="perm-rules-add">
                         <input type="text" id="perm-rules-input-ask" placeholder="PowerShell(git push*)"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('ask');}" />
-                        <button type="button" onclick="addPermRule('ask')">Add</button>
+                        <button type="button" onclick="addPermRule('ask')" data-i18n="common.add">Add</button>
                     </div>
                     <div class="perm-rules-error" id="perm-rules-error-ask" hidden></div>
                 </div>
                 <div class="perm-rules-group">
-                    <div class="perm-rules-group-title">⛔ Deny — block the tool</div>
+                    <div class="perm-rules-group-title" data-i18n="rules.deny">⛔ Deny — block the tool</div>
                     <div class="perm-rules-list" id="perm-rules-deny"></div>
                     <div class="perm-rules-add">
                         <input type="text" id="perm-rules-input-deny" placeholder="PowerShell(rm *)"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('deny');}" />
-                        <button type="button" onclick="addPermRule('deny')">Add</button>
+                        <button type="button" onclick="addPermRule('deny')" data-i18n="common.add">Add</button>
                     </div>
                     <div class="perm-rules-error" id="perm-rules-error-deny" hidden></div>
                 </div>
             </div>
             <div class="cmd-modal-buttons">
-                <button class="trust-deny" onclick="closePermRulesModal()">Close</button>
+                <button class="trust-deny" onclick="closePermRulesModal()" data-i18n="common.close">Close</button>
             </div>
         </div>
     </div>
@@ -780,17 +876,17 @@
             <div class="trust-modal-header">
                 <span class="trust-modal-icon">🔒</span>
                 <div>
-                    <div class="trust-modal-eyebrow">Trusted workspaces</div>
-                    <div class="trust-modal-headline">Folders Claude can run code in</div>
+                    <div class="trust-modal-eyebrow" data-i18n="top.trusted">Trusted workspaces</div>
+                    <div class="trust-modal-headline" data-i18n="trusted.headline">Folders Claude can run code in</div>
                 </div>
             </div>
             <div class="trusted-workspaces-modal-body">
                 <div id="trusted-workspaces-list" class="trusted-workspaces-list">
-                    <div class="trusted-workspaces-empty">No trusted workspaces yet.</div>
+                    <div class="trusted-workspaces-empty" data-i18n="trusted.empty">No trusted workspaces yet.</div>
                 </div>
             </div>
             <div class="cmd-modal-buttons trusted-workspaces-buttons">
-                <button class="trust-deny" onclick="closeTrustedWorkspacesModal()">Close</button>
+                <button class="trust-deny" onclick="closeTrustedWorkspacesModal()" data-i18n="common.close">Close</button>
             </div>
         </div>
     </div>
@@ -800,23 +896,53 @@
             <div class="signin-header">
                 <span class="signin-icon">🔑</span>
                 <div class="signin-title">
-                    <div class="signin-eyebrow">Sign in to Claude</div>
-                    <div class="signin-headline">Complete the steps in the terminal</div>
+                    <div class="signin-eyebrow" data-i18n="signin.eyebrow">Sign in to Claude</div>
+                    <div class="signin-headline" data-i18n="signin.headline">Complete the steps in the terminal</div>
                 </div>
             </div>
             <ol class="signin-steps">
-                <li>A terminal window opened with <code>claude login</code>.</li>
-                <li>It will print a URL — open it in your browser.</li>
-                <li>Authorize and copy the code back.</li>
-                <li>Paste the code into the terminal and press Enter.</li>
+                <li data-i18n-html="signin.step1">A terminal window opened with <code>claude login</code>.</li>
+                <li data-i18n="signin.step2">It will print a URL — open it in your browser.</li>
+                <li data-i18n="signin.step3">Authorize and copy the code back.</li>
+                <li data-i18n="signin.step4">Paste the code into the terminal and press Enter.</li>
             </ol>
             <div class="signin-status">
                 <span class="signin-spinner"></span>
-                <span>Waiting for sign-in to complete…</span>
+                <span data-i18n="signin.waiting">Waiting for sign-in to complete…</span>
             </div>
             <div class="cmd-modal-buttons signin-buttons">
-                <button class="trust-deny" onclick="closeSigninOverlay()">Close</button>
+                <button class="trust-deny" onclick="closeSigninOverlay()" data-i18n="common.close">Close</button>
             </div>
+        </div>
+    </div>
+
+    <div class="cmd-modal-overlay" id="plugins-modal-overlay" onclick="if(overlayClicked(event,this))closePluginsModal()">
+        <div class="cmd-modal plugins-modal">
+            <div class="plugins-head">
+                <h3 data-i18n="plugins.title">Plugins</h3>
+                <button class="plugins-close" onclick="closePluginsModal()" data-i18n-title="common.close" title="Close">✕</button>
+            </div>
+            <div class="plugins-tabs" id="plugins-tabs">
+                <button data-tab="installed" class="active" onclick="setPluginsTab(PluginsTab.Installed)" data-i18n="plugins.tabInstalled">Installed</button>
+                <button data-tab="discover" onclick="setPluginsTab(PluginsTab.Discover)" data-i18n="plugins.tabDiscover">Discover</button>
+                <button data-tab="marketplaces" onclick="setPluginsTab(PluginsTab.Marketplaces)" data-i18n="plugins.tabMarketplaces">Marketplaces</button>
+            </div>
+            <div class="plugins-bar" id="plugins-bar-search">
+                <input id="plugins-search" type="text" data-i18n-placeholder="plugins.search" placeholder="Search plugins" oninput="renderPlugins()" />
+                <select id="plugins-scope" data-i18n-title="plugins.scopeTitle" title="Install scope">
+                    <option value="user">user</option>
+                    <option value="project">project</option>
+                    <option value="local">local</option>
+                </select>
+            </div>
+            <div class="plugins-bar" id="plugins-bar-mkt" hidden>
+                <input id="plugins-mkt-source" type="text" data-i18n-placeholder="plugins.mktSource" placeholder="owner/repo, git URL or path"
+                       onkeydown="if(event.key==='Enter')addPluginMarketplace()" />
+                <button class="plugins-btn" onclick="addPluginMarketplace()" data-i18n="plugins.add">Add</button>
+                <button class="plugins-btn" onclick="pluginAction(PluginAction.MarketplaceUpdate, '')" data-i18n="plugins.updateAll">Update all</button>
+            </div>
+            <div class="plugins-list" id="plugins-list"></div>
+            <div class="plugins-status" id="plugins-status"></div>
         </div>
     </div>
 
@@ -825,11 +951,11 @@
             <div class="trust-modal-header">
                 <span class="trust-modal-icon">🔌</span>
                 <div class="trust-modal-title">
-                    <div class="trust-modal-eyebrow">MCP servers awaiting trust</div>
-                    <div class="trust-modal-headline">Approve servers before claude loads them</div>
+                    <div class="trust-modal-eyebrow" data-i18n="mcpTrust.eyebrow">MCP servers awaiting trust</div>
+                    <div class="trust-modal-headline" data-i18n="mcpTrust.headline">Approve servers before claude loads them</div>
                 </div>
             </div>
-            <div class="trust-modal-body">
+            <div class="trust-modal-body" data-i18n-html="mcpTrust.body">
                 Each MCP server below can run code on your machine or talk to a remote
                 endpoint. Tick the ones you recognize and trust — they're saved to
                 <code>trusted-mcp-servers.json</code>. Unchecked ones get skipped for
@@ -839,33 +965,34 @@
             <div class="mcp-trust-list" id="mcp-trust-list"></div>
             <div class="mcp-trust-actions">
                 <label class="mcp-trust-select-all">
-                    <span>Select all</span>
+                    <span data-i18n="mcpTrust.selectAll">Select all</span>
                     <input type="checkbox" id="mcp-trust-select-all" onchange="mcpTrustToggleAll(this.checked)" />
                 </label>
             </div>
             <div class="cmd-modal-buttons trust-modal-buttons">
-                <button class="trust-deny" onclick="mcpTrustCancel()" title="Don't trust or remember; just stop asking this VS session">Skip for this session</button>
-                <button class="trust-allow" id="mcp-trust-submit" onclick="mcpTrustSubmit()" title="Trust checked, skip unchecked for this session">Apply</button>
+                <button class="trust-deny" onclick="mcpTrustCancel()" data-i18n-title="mcpTrust.skipTitle" title="Don't trust or remember; just stop asking this VS session" data-i18n="mcpTrust.skip">Skip for this session</button>
+                <button class="trust-allow" id="mcp-trust-submit" onclick="mcpTrustSubmit()" data-i18n-title="mcpTrust.applyTitle" title="Trust checked, skip unchecked for this session" data-i18n="common.apply">Apply</button>
             </div>
         </div>
     </div>
 
     <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(overlayClicked(event,this))closeAddCommand()">
         <div class="cmd-modal">
-            <h3>Add command</h3>
-            <label>Name (shown in menu)</label>
-            <input id="cmd-modal-name" placeholder="E.g. Code Review" onkeydown="if(event.key==='Enter')document.getElementById('cmd-modal-cmd').focus()" />
-            <label>Command (sent to Claude)</label>
-            <input id="cmd-modal-cmd" placeholder="E.g. /review" onkeydown="if(event.key==='Enter')saveNewCommand()" />
+            <h3 data-i18n="addCmd.title">Add command</h3>
+            <label data-i18n="addCmd.name">Name (shown in menu)</label>
+            <input id="cmd-modal-name" data-i18n-placeholder="addCmd.namePlaceholder" placeholder="E.g. Code Review" onkeydown="if(event.key==='Enter')document.getElementById('cmd-modal-cmd').focus()" />
+            <label data-i18n="addCmd.command">Command (sent to Claude)</label>
+            <input id="cmd-modal-cmd" data-i18n-placeholder="addCmd.commandPlaceholder" placeholder="E.g. /review" onkeydown="if(event.key==='Enter')saveNewCommand()" />
             <div class="cmd-modal-buttons">
-                <button onclick="closeAddCommand()">Cancel</button>
-                <button class="btn-primary" onclick="saveNewCommand()">Add</button>
+                <button onclick="closeAddCommand()" data-i18n="common.cancel">Cancel</button>
+                <button class="btn-primary" onclick="saveNewCommand()" data-i18n="common.add">Add</button>
             </div>
         </div>
     </div>
 
     <script src="marked.min.js" charset="utf-8"></script>
     <script src="highlight.min.js" charset="utf-8"></script>
+    <script src="i18n.js" charset="utf-8"></script>
     <script src="app.js" charset="utf-8"></script>
 </body>
 </html>

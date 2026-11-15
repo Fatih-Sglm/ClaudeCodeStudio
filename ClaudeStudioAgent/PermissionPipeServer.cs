@@ -104,10 +104,101 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         lock (_sessionAllowedLock) _sessionAllowed.Add(toolName);
     }
 
-    private bool IsSessionAllowed(string toolName)
+    public bool IsSessionAllowed(string toolName)
     {
         lock (_sessionAllowedLock) return _sessionAllowed.Contains(toolName);
     }
+
+    // "Edit automatically" (UI mode acceptEdits): file edits inside this folder
+    // are approved without a modal; commands and edits elsewhere still ask.
+    // Null = mode off. Set per chat request, like the rules.
+    private volatile string? _acceptEditsRoot;
+
+    public void SetAcceptEditsRoot(string? root) =>
+        _acceptEditsRoot = string.IsNullOrWhiteSpace(root) ? null : root;
+
+    // Edits here can grant permissions or run code (settings/allow rules,
+    // hooks, git config fsmonitor/filters, MCP servers, IDE tasks), so
+    // "Edit automatically" still asks for them — same idea as the CLI's own
+    // protected paths. Matched per path segment, case-insensitively.
+    // MSBuild files (*.csproj, *.props, *.targets, *.csproj.user, Directory.Build.*)
+    // are evaluated by VS's design-time build on project load, so an <Exec> in
+    // one would run without any prompt; NuGet/SDK config can swap packages/SDKs.
+    private static readonly HashSet<string> ProtectedDirs = new(StringComparer.OrdinalIgnoreCase) { ".git", ".claude", ".vscode", ".idea", ".vs", ".husky" };
+    private static readonly HashSet<string> ProtectedFiles = new(StringComparer.OrdinalIgnoreCase) { ".mcp.json", ".gitattributes", ".gitmodules", ".gitconfig", "nuget.config", "global.json" };
+    private static readonly HashSet<string> ProtectedExtensions = new(StringComparer.OrdinalIgnoreCase) { ".props", ".targets", ".user" };
+
+    private static bool IsProtectedFile(string name)
+    {
+        var ext = Path.GetExtension(name);
+        return ProtectedFiles.Contains(name) || ProtectedExtensions.Contains(ext) || ext.EndsWith("proj", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // True when the call is a file-editing tool whose target resolves inside
+    // root and isn't a protected path. Relative paths resolve against root;
+    // ".." is normalized away first. Anything ambiguous returns false (= ask).
+    public static bool IsEditInside(string root, string toolName, string? toolInputJson)
+    {
+        if (toolName is not ("Write" or "Edit" or "MultiEdit" or "NotebookEdit")) return false;
+        try
+        {
+            var el = JsonSerializer.Deserialize<JsonElement>(toolInputJson ?? "{}");
+            string? path = null;
+            if (el.ValueKind == JsonValueKind.Object)
+                foreach (var key in new[] { "file_path", "notebook_path" })
+                    if (el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String) { path = v.GetString(); break; }
+            if (string.IsNullOrWhiteSpace(path)) return false;
+
+            // A drive root, or a folder that holds the user profile, would make
+            // "inside the workspace" mean almost everywhere (Startup, .ssh, ...).
+            var rootPath = Path.GetFullPath(root);
+            if (Path.GetDirectoryName(rootPath) is null) return false;
+            var fullRoot = rootPath.TrimEnd('\\', '/');
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (profile.Length > 0 && (profile.TrimEnd('\\', '/') + Path.DirectorySeparatorChar).StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
+
+            var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(fullRoot, path));
+            if (!full.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
+
+            var segments = full.Substring(fullRoot.Length + 1).Split('\\', '/');
+            foreach (var seg in segments)
+            {
+                // Names Windows would map elsewhere: 8.3 short names (GIT~1),
+                // streams (":"), trailing dots/spaces (".git." = ".git").
+                if (seg.Length == 0 || seg.Contains('~') || seg.Contains(':') || seg.EndsWith(".") || seg.EndsWith(" ")) return false;
+                if (ProtectedDirs.Contains(seg)) return false;
+            }
+            if (IsProtectedFile(segments[^1])) return false;
+
+            // A symlink/junction anywhere below root could point outside it (or
+            // into .git): don't auto-approve through one.
+            for (var p = full; p.Length > fullRoot.Length; p = Path.GetDirectoryName(p)!)
+                if ((File.Exists(p) || Directory.Exists(p)) && File.GetAttributes(p).HasFlag(FileAttributes.ReparsePoint)) return false;
+            // A hard link shares its data with another name, possibly outside root.
+            if (File.Exists(full) && HardLinkCount(full) != 1) return false;
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // Names pointing at this file's data; 0 when it can't be read (= ask).
+    private static uint HardLinkCount(string path)
+    {
+        if (!OperatingSystem.IsWindows()) return 1; // ponytail: Windows-only agent; st_nlink if it ever ships elsewhere
+        using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return GetFileInformationByHandle(handle, out var info) ? info.NumberOfLinks : 0;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public uint CreationTimeLow, CreationTimeHigh, LastAccessTimeLow, LastAccessTimeHigh, LastWriteTimeLow, LastWriteTimeHigh;
+        public uint VolumeSerialNumber, FileSizeHigh, FileSizeLow, NumberOfLinks, FileIndexHigh, FileIndexLow;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, out ByHandleFileInformation info);
 
     // ── V6 permission rules ────────────────────────────────────────────────
     // Claude-style rule strings ("Bash(git *)", "Read") evaluated before the
@@ -335,6 +426,11 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
             {
                 decision = new Decision(true, null);
                 LogAuto($"allowed by rule: {matchedRule}");
+            }
+            else if (verdict != RuleVerdict.Ask && _acceptEditsRoot is { } editRoot && IsEditInside(editRoot, toolName!, toolInput))
+            {
+                decision = new Decision(true, null);
+                LogAuto("allowed: workspace edit (Edit automatically)");
             }
             else if (verdict != RuleVerdict.Ask && IsSessionAllowed(toolName!))
             {

@@ -1,11 +1,27 @@
+using System.Text.Json.Serialization;
+
 namespace ClaudeStudioShared;
+
+// The composer's permission modes (same set as the official VS Code extension).
+// Serialized by name; reading is case-insensitive, so the webview's
+// "acceptEdits" lands on AcceptEdits. CLI mode strings are a separate
+// vocabulary — the agent maps these to them at spawn time.
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum PermissionMode
+{
+    Ask,         // "Manual": every gated tool asks
+    AcceptEdits, // "Edit automatically": workspace edits auto-approved, the rest asks
+    Plan,        // "Plan": explore and present a plan before editing
+    Auto,        // "Auto": the CLI's own safety check decides, pauses ask
+    BypassPermissions // "Bypass permissions" (danger-marked): no prompts, no safety check
+}
 
 public class ChatRequest
 {
     public string Message { get; set; } = "";
     public string Model { get; set; } = "claude-sonnet-5";
     public string? Effort { get; set; }
-    public string PermissionMode { get; set; } = "ask";
+    public PermissionMode PermissionMode { get; set; } = PermissionMode.Ask;
     public bool ResetSession { get; set; }
     public string? ResumeSessionId { get; set; }
     // #12: passes --fork-session alongside --resume so claude creates a new
@@ -53,6 +69,19 @@ public class ChatRequest
     // MCP live-session probes (V20): status list and per-server reconnect,
     // forwarded back as "mcp-status-result" / "mcp-reconnect-result" chunks.
     public bool McpStatus { get; set; }
+
+    // Remote Control (claude.ai/code + Claude mobile app). RemoteControl is the
+    // composer toggle, carried on every chat so a new/respawned session comes
+    // up the same way; RemoteControlToggle flips a live session right away.
+    // Both use control_request {subtype:"remote_control", enabled} (probed on
+    // 2.1.323: works on a headless stream-json session, no flag, no model
+    // call) and answer with a "remote-control-result" chunk.
+    public bool RemoteControl { get; set; }
+    public bool? RemoteControlToggle { get; set; }
+    // Sent while a turn is streaming: the agent only writes the request to
+    // claude and answers with remote-control-result inside the running turn
+    // (no "done"), instead of waiting for the turn to end.
+    public bool RemoteControlLive { get; set; }
     public string? McpReconnectServer { get; set; }
 
     // Side question (V19): answered with the session's context but kept out of
@@ -106,6 +135,11 @@ public class ClaudeSettings
     // Cancelling the turn still releases every waiting hook, so waiting forever
     // is recoverable.
     public int PermissionTimeoutMinutes { get; set; }
+
+    // ⚙ "Performance metrics" (default off): the agent appends per-turn
+    // durations and message counts to perf.jsonl — never prompt/response text.
+    // Not part of the spawn fingerprint, so flipping it never respawns claude.
+    public bool PerfMetrics { get; set; }
 }
 
 public class RewindRequest

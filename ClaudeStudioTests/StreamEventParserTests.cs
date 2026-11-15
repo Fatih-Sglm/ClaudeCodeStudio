@@ -14,7 +14,7 @@ public class StreamEventParserTests
 
     private static StreamEventResult Process(
         string json, StreamEventState? state = null, long elapsedMs = 0,
-        string? workingDirectory = null, string expectedCliPermissionMode = "default", string requestedPermissionMode = "ask")
+        string? workingDirectory = null, string expectedCliPermissionMode = "default", PermissionMode requestedPermissionMode = PermissionMode.Ask)
         => StreamEventParser.Process(Parse(json), state ?? new StreamEventState(), elapsedMs, workingDirectory, expectedCliPermissionMode, requestedPermissionMode);
 
     // ---- system/informational ----
@@ -120,10 +120,10 @@ public class StreamEventParserTests
     {
         var result = Process(
             """{"type":"system","subtype":"init","permissionMode":"default"}""",
-            expectedCliPermissionMode: "bypassPermissions", requestedPermissionMode: "yolo");
+            expectedCliPermissionMode: "bypassPermissions", requestedPermissionMode: PermissionMode.Auto);
 
         var warn = Assert.Single(result.Chunks, c => c.Type == "warn");
-        Assert.Contains("yolo", warn.Text);
+        Assert.Contains("Auto", warn.Text);
         Assert.Contains("bypassPermissions", warn.Text);
         Assert.Contains("default", warn.Text);
     }
@@ -133,7 +133,7 @@ public class StreamEventParserTests
     {
         var result = Process(
             """{"type":"system","subtype":"init","permissionMode":"default"}""",
-            expectedCliPermissionMode: "default", requestedPermissionMode: "ask");
+            expectedCliPermissionMode: "default", requestedPermissionMode: PermissionMode.Ask);
 
         Assert.DoesNotContain(result.Chunks, c => c.Type == "warn");
     }

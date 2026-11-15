@@ -9,7 +9,7 @@ public class UsageToolWindow : ToolWindowPane
 {
     public UsageToolWindow() : base(null)
     {
-        this.Caption = "Claude Code Studio Usage";
+        Localization.Strings.BindCaption(this, "usage.caption");
         this.Content = new UsageToolWindowControl();
     }
 }

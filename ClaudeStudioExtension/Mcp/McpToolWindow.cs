@@ -10,7 +10,7 @@ public class McpToolWindow : ToolWindowPane
 {
     public McpToolWindow() : base(null)
     {
-        this.Caption = "Claude Code Studio MCP Servers";
+        Localization.Strings.BindCaption(this, "mcp.caption");
         this.BitmapImageMoniker = KnownMonikers.Extension;
         this.Content = new McpToolWindowControl();
     }

@@ -17,6 +17,9 @@ public sealed class JsonlWatcher : IDisposable
 
     private FileSystemWatcher? _watcher;
     private string? _filePath;
+
+    // Transcript file being watched (null when stopped).
+    public string? FilePath => _filePath;
     private long _offset;
     private readonly byte[] _buffer = new byte[8192];
     // Stateful decoder: a multibyte UTF-8 char split across two reads must not

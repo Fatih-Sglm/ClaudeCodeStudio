@@ -61,6 +61,10 @@ _ = Task.Run(() =>
 
 ClaudeSession? session = null;
 
+// Direct webview transport (WebSocket). Step 1 prototype: the webview connects
+// and authenticates; streamed output still goes over stdout for now.
+using var socketServer = new AgentSocketServer(EmitInfo);
+
 // Stdin reading is decoupled from request processing. The main loop spends most
 // of its time inside SendMessageAsync, blocked on claude's stdout. If stdin were
 // read on that same thread, PermissionResponse lines arriving mid-turn would
@@ -146,6 +150,21 @@ var stdinReader = Task.Run(async () =>
                 continue;
             }
 
+            if (request.RemoteControlToggle is bool liveToggle && request.RemoteControlLive)
+            {
+                // Mid-turn switch: the main loop is busy with the turn, so write
+                // the request here; whichever loop reads claude's stdout next
+                // answers it (ClaudeSession.TryHandleRemoteControlResponse).
+                if (session == null || !session.IsAlive)
+                    ClaudeSession.EmitRemoteControlResult(new { enabled = liveToggle, pending = true });
+                else
+                {
+                    try { await session.SendRemoteControlLiveAsync(liveToggle); }
+                    catch (Exception ex) { ClaudeSession.EmitRemoteControlResult(new { enabled = !liveToggle, error = "failed" }, $"remote-control (live): {ex.Message}"); }
+                }
+                continue;
+            }
+
             if (request.CancelTurn)
             {
                 // Unblock any hook still waiting on a permission decision FIRST:
@@ -184,7 +203,8 @@ var stdinReader = Task.Run(async () =>
 
 try
 {
-    Console.WriteLine("READY");
+    // The socket endpoint rides on READY. The token is a secret: nothing may log this line.
+    Console.WriteLine("READY " + JsonSerializer.Serialize(new { port = socketServer.Port, token = socketServer.Token }));
     Console.Out.Flush();
 
     await foreach (var request in requestChannel.Reader.ReadAllAsync())
@@ -238,6 +258,23 @@ try
             continue;
         }
 
+        if (request.RemoteControlToggle is bool rcToggle)
+        {
+            // No live claude yet: the toggle rides on the next chat request.
+            if (session == null || !session.IsAlive)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "remote-control-result", Text = JsonSerializer.Serialize(new { enabled = rcToggle, pending = true }) }));
+                Console.Out.Flush();
+            }
+            else
+            {
+                try { await session.SetRemoteControlAsync(rcToggle); }
+                catch (Exception ex) { EmitError($"remote-control failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
         if (request.McpStatus)
         {
             if (session == null || !session.IsAlive)
@@ -282,6 +319,7 @@ try
         // without restarting the session.
         pipeServer?.SetRules(PermissionRuleMerge.Merge(request.ClaudeSettings, request.WorkingDirectory));
         pipeServer?.SetPermissionTimeout(request.ClaudeSettings?.PermissionTimeoutMinutes ?? 0);
+        pipeServer?.SetAcceptEditsRoot(request.PermissionMode == PermissionMode.AcceptEdits ? request.WorkingDirectory : null);
 
         var wantKey = ClaudeSession.MakeKey(request);
 
@@ -291,10 +329,10 @@ try
         // the respawn block below rebuild it under the requested mode — the
         // user's message still goes through either way.
         if (session != null && session.Key == wantKey && session.IsAlive &&
-            !string.Equals(session.UiPermissionMode, request.PermissionMode ?? "ask", StringComparison.Ordinal))
+            session.UiPermissionMode != request.PermissionMode)
         {
             var switched = false;
-            try { switched = await session.SwitchPermissionModeAsync(request.PermissionMode ?? "ask"); }
+            try { switched = await session.SwitchPermissionModeAsync(request.PermissionMode); }
             catch (Exception ex)
             {
                 // Not user-facing (the respawn fallback recovers) — the timing
@@ -339,6 +377,16 @@ try
             }
         }
 
+        // Bring a new/respawned (or toggled-while-busy) claude in line with the
+        // composer's Remote Control switch before the message goes out.
+        if (session.RemoteControlOn != request.RemoteControl)
+        {
+            try { await session.SetRemoteControlAsync(request.RemoteControl); }
+            catch (Exception ex) { EmitError($"remote-control failed: {ex.Message}"); }
+        }
+
+        session.PerfMetrics = request.ClaudeSettings?.PerfMetrics == true;
+        session.IsSessionAllowed = pipeServer == null ? null : pipeServer.IsSessionAllowed;
         try
         {
             await session.SendMessageAsync(request.Message ?? "");
@@ -379,6 +427,12 @@ static void EmitDone()
     Console.Out.Flush();
 }
 
+static void EmitInfo(string text)
+{
+    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "info", Text = text }));
+    Console.Out.Flush();
+}
+
 
 /// <summary>
 /// Holds a single persistent claude.exe instance running with --input-format stream-json
@@ -392,7 +446,7 @@ sealed class ClaudeSession : IAsyncDisposable
 {
     private readonly string _model;
     private readonly string? _effort;
-    private readonly string _permissionMode;
+    private readonly PermissionMode _permissionMode;
     private readonly string? _workingDirectory;
     private readonly string? _resumeSessionId;
     private readonly bool _forkSession;
@@ -454,7 +508,7 @@ sealed class ClaudeSession : IAsyncDisposable
     {
         _model = request.Model ?? "claude-sonnet-5";
         _effort = request.Effort;
-        _permissionMode = request.PermissionMode ?? "ask";
+        _permissionMode = request.PermissionMode;
         _workingDirectory = request.WorkingDirectory;
         _resumeSessionId = request.ResumeSessionId;
         _forkSession = request.ForkSession;
@@ -472,17 +526,17 @@ sealed class ClaudeSession : IAsyncDisposable
         Key = MakeKey(request);
     }
 
-    // The UI-level mode currently in effect ("ask"/"plan"/"yolo") — updated by
+    // The UI-level mode currently in effect ("ask"/"acceptEdits"/"plan"/"auto") — updated by
     // SwitchPermissionModeAsync when the main loop flips a reused session.
-    public string UiPermissionMode { get; private set; }
+    public PermissionMode UiPermissionMode { get; private set; }
 
     // Live permission-mode switch without a respawn (set_permission_mode over
     // stdio, PoC-confirmed on 2.1.144). Maps UI modes to CLI modes the same way
     // the spawn does: plan → plan; ask → bypassPermissions when the hook pipe
     // is the gatekeeper, else claude's default mode.
-    public async Task<bool> SwitchPermissionModeAsync(string uiMode)
+    public async Task<bool> SwitchPermissionModeAsync(PermissionMode uiMode)
     {
-        var cliMode = uiMode == "plan" ? "plan" : (_pipeName != null ? "bypassPermissions" : "default");
+        var cliMode = uiMode == PermissionMode.Plan ? "plan" : (_pipeName != null ? "bypassPermissions" : "default");
         var resp = await SendControlRequestAsync(new { subtype = "set_permission_mode", mode = cliMode }, "set-permission-mode", quietErrors: true);
         if (resp == null) return false;
         UiPermissionMode = uiMode;
@@ -506,16 +560,20 @@ sealed class ClaudeSession : IAsyncDisposable
 
     // ask and plan share a spawn profile (hooks + prompt tool + settings) and
     // flip between each other live via set_permission_mode — so the key must
-    // not change between them. yolo spawns with --dangerously-skip-permissions
-    // (a flag, not a mode) and keeps its own profile (mode changes to/from
-    // yolo still respawn). #8: dontAsk is a genuine CLI-native mode (probed
-    // 2026-07-20) — the CLI blocks all writes itself before a PreToolUse hook
-    // would ever see them, so it needs neither hooks nor bypassPermissions;
-    // its own profile means switching to/from it always respawns too, same as
-    // yolo (no attempt to live-switch into/out of a mode with a different
-    // spawn shape — set_permission_mode is only PoC-confirmed for plan<->ask).
-    private static string PermissionProfile(string? mode) =>
-        mode == "yolo" ? "yolo" : mode == "dontAsk" ? "dontAsk" : "hooked";
+    // not change between them (set_permission_mode is only PoC-confirmed for
+    // plan<->ask; modes with a different spawn shape always respawn).
+    // acceptEdits ("Edit automatically") joins ask/plan in the hooked profile —
+    // the difference lives in the pipe (workspace edits auto-approved), so it
+    // switches live too. auto spawns without the PreToolUse gate and with the
+    // CLI's own --permission-mode auto, so switching to/from it respawns.
+    // BypassPermissions spawns with --dangerously-skip-permissions (a flag, not
+    // a mode), so it has its own profile too.
+    private static string PermissionProfile(PermissionMode mode) => mode switch
+    {
+        PermissionMode.Auto => "auto",
+        PermissionMode.BypassPermissions => "bypass",
+        _ => "hooked",
+    };
 
     // #19: what claude's own init.permissionMode should read back as, given
     // how each UI mode actually spawns (mirrors the branches ~line 622+).
@@ -523,10 +581,10 @@ sealed class ClaudeSession : IAsyncDisposable
     // that's the expected, correct case, not a mismatch.
     private string ExpectedCliPermissionMode() => _permissionMode switch
     {
-        "yolo" => "bypassPermissions",
-        "dontAsk" => "dontAsk",
-        "plan" => "plan",
-        _ => _pipeName != null ? "bypassPermissions" : "default", // "ask"
+        PermissionMode.Auto => "auto",
+        PermissionMode.Plan => "plan",
+        PermissionMode.BypassPermissions => "bypassPermissions",
+        _ => _pipeName != null ? "bypassPermissions" : "default", // "ask" / "acceptEdits"
     };
 
     // Appended to claude's system prompt (--append-system-prompt). Mirrors the
@@ -640,31 +698,42 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // user configured any claude settings.
         bool settingsWritten = false;
 
-        if (_permissionMode == "yolo")
+        if (_permissionMode == PermissionMode.BypassPermissions)
         {
+            // Every tool runs unasked — no hook, no CLI check. The UI marks
+            // this mode as dangerous wherever it is shown.
             psi.ArgumentList.Add("--dangerously-skip-permissions");
         }
-        else if (_permissionMode == "dontAsk")
+        else if (_permissionMode == PermissionMode.Auto)
         {
-            // #8: probed 2026-07-20 — real, CLI-enforced deny-by-default for
-            // writes (Edit/Write/file-modifying Bash all get refused with a
-            // clear message, no prompt); reads/searches run freely. No hooks,
-            // no bypass — the CLI itself is the sole gatekeeper here.
+            // CLI-native Auto mode (probed 2026-11-15 on 2.1.323: init reports
+            // permissionMode "auto"; explicitly requested commands run without a
+            // prompt). The CLI's safety check is the gatekeeper, so there is NO
+            // PreToolUse gate — it would turn every call into a modal. Anything
+            // the CLI pauses on arrives as can_use_tool on the stdio prompt
+            // channel and goes to the permission modal (StreamEventParser).
+            // Permission rules apply natively via the settings file. The
+            // PostToolUse diagnostics hook stays.
             psi.ArgumentList.Add("--permission-mode");
-            psi.ArgumentList.Add("dontAsk");
-
-            // Same as the hook-pipe branch below: pasted images (Ctrl+V) land
-            // in %TEMP%/ClaudeStudio — allow Read there even though writes
-            // are blocked everywhere in this mode.
-            var dontAskTempDir = Path.Combine(Path.GetTempPath(), "ClaudeStudio");
-            if (!Directory.Exists(dontAskTempDir))
+            psi.ArgumentList.Add("auto");
+            if (_pipeName != null)
             {
-                try { Directory.CreateDirectory(dontAskTempDir); } catch { }
+                psi.ArgumentList.Add("--settings");
+                psi.ArgumentList.Add(WriteSettings(includeHooks: true, gateTools: false)!);
+                psi.ArgumentList.Add("--include-hook-events");
+                settingsWritten = true;
+            }
+
+            // Pasted images (Ctrl+V) land in %TEMP%/ClaudeStudio — same as below.
+            var autoTempDir = Path.Combine(Path.GetTempPath(), "ClaudeStudio");
+            if (!Directory.Exists(autoTempDir))
+            {
+                try { Directory.CreateDirectory(autoTempDir); } catch { }
             }
             psi.ArgumentList.Add("--add-dir");
-            psi.ArgumentList.Add(dontAskTempDir);
+            psi.ArgumentList.Add(autoTempDir);
         }
-        else // "ask" / "plan" — one spawn profile, live-switchable via set_permission_mode
+        else // "ask" / "acceptEdits" / "plan" — one spawn profile, live-switchable via set_permission_mode
         {
             // When a pipe is available (CLAUDESTUDIO_HOOK_ENABLE=1), wire a PreToolUse
             // hook pointing back to ourselves so prompts route to the UI. Without a
@@ -697,7 +766,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 // via --settings + --include-hook-events) remains the sole
                 // gatekeeper — modal still appears for matched tools.
                 psi.ArgumentList.Add("--permission-mode");
-                psi.ArgumentList.Add(_permissionMode == "plan" ? "plan" : "bypassPermissions");
+                psi.ArgumentList.Add(_permissionMode == PermissionMode.Plan ? "plan" : "bypassPermissions");
 
                 // Allow Read of transient files the extension drops here —
                 // pasted screenshots (Ctrl+V) land in %TEMP%/ClaudeStudio/.
@@ -711,7 +780,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 psi.ArgumentList.Add("--add-dir");
                 psi.ArgumentList.Add(sharedTempDir);
             }
-            else if (_permissionMode == "plan")
+            else if (_permissionMode == PermissionMode.Plan)
             {
                 psi.ArgumentList.Add("--permission-mode");
                 psi.ArgumentList.Add("plan");
@@ -721,7 +790,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
 
         // Apply user-configured claude settings in modes that didn't already write
-        // a settings.json (plan / yolo / ask-without-pipe). No-op if nothing set.
+        // a settings.json (plan / bypass / ask-without-pipe; auto writes its own). No-op if nothing set.
         if (!settingsWritten)
         {
             var claudeSettingsPath = WriteSettings(includeHooks: false);
@@ -945,8 +1014,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
             // set_permission_mode (with UiPermissionMode stuck on "plan" the
             // main loop would see no change and skip the switch — bloco 20,
             // validation 2026-07-18). The UI flips its pill to ask in parallel.
-            if (UiPermissionMode == "plan")
-                UiPermissionMode = "ask";
+            if (UiPermissionMode == PermissionMode.Plan)
+                UiPermissionMode = PermissionMode.Ask;
         }
         else
             await WriteControlResponseAsync(pending.RequestId,
@@ -984,12 +1053,88 @@ The user's IDE selection (if any) is included in the conversation context and ma
         finally { _stdinLock.Release(); }
     }
 
+    // Per-turn, set by the main loop from ClaudeSettings.PerfMetrics.
+    public bool PerfMetrics { get; set; }
+
+    // The pipe's "allow for session" list. Auto mode prompts over the control
+    // channel instead of the pipe, so it consults the same list here.
+    public Func<string, bool>? IsSessionAllowed { get; set; }
+
+    // Per-tool file changes for shell tools (GitSnapshot). Created on the
+    // session's first turn; null when the workspace isn't a git work tree.
+    private GitSnapshot? _snapshot;
+    private bool _snapshotTried;
+
+    // Tools whose result gets a "files changed" diff, and tools that already
+    // show their own diff (they only move the baseline forward).
+    private static readonly HashSet<string> ReportChangesTools = new(StringComparer.Ordinal) { "Bash", "PowerShell", "Task", "Agent" };
+    private static readonly HashSet<string> SelfDiffTools = new(StringComparer.Ordinal) { "Edit", "Write", "MultiEdit", "NotebookEdit" };
+
+    // Chained so a turn that ends before its snapshot finished can't run two
+    // `git add` against the same private index at once.
+    private Task _snapshotWork = Task.CompletedTask;
+
+    private async Task PrepareSnapshotAsync(Task previous)
+    {
+        try { await previous; } catch { }
+        try
+        {
+            if (_snapshot != null) { await _snapshot.AdvanceAsync(); return; }
+            if (_snapshotTried || string.IsNullOrEmpty(_workingDirectory)) return;
+            _snapshotTried = true;
+            _snapshot = await GitSnapshot.CreateAsync(_workingDirectory!);
+        }
+        catch { /* feature stays off; never fails a turn */ }
+    }
+
+    // tool_files Tool value when the diff covers several tools that ran at once
+    // (it's attached to the one that finished last).
+    public const string ToolFilesParallel = "parallel";
+
+    // Bumped at the end of each turn: a diff still being taken then is dropped,
+    // so a late tool_files can't land in the next turn.
+    private int _snapshotTurn;
+    private static readonly TimeSpan SnapshotDrainTimeout = TimeSpan.FromSeconds(5);
+
+    // After a file-changing tool finishes: report = send what changed
+    // ("tool_files", Text = unified diff), otherwise (Edit/Write show their own
+    // diff) only move the baseline. Runs chained on _snapshotWork, off the
+    // stdout read loop, so git never delays streaming.
+    private async Task ReportToolChangesAsync(Task previous, bool report, string toolId, bool parallel, int turn)
+    {
+        try { await previous; } catch { }
+        try
+        {
+            if (_snapshot == null) return;
+            if (!report) { await _snapshot.AdvanceAsync(); return; }
+            var diff = await _snapshot.TakeDiffAsync();
+            if (diff.Length == 0 || turn != Volatile.Read(ref _snapshotTurn)) return;
+            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tool_files", ToolId = toolId, Tool = parallel ? ToolFilesParallel : null, Text = diff }));
+            Console.Out.Flush();
+        }
+        catch { /* best effort; never fails a turn */ }
+    }
+
+    // End of turn: give pending diffs a moment, then cut them off.
+    private async Task DrainSnapshotWorkAsync()
+    {
+        await Task.WhenAny(_snapshotWork, Task.Delay(SnapshotDrainTimeout));
+        Interlocked.Increment(ref _snapshotTurn);
+    }
+
     public async Task SendMessageAsync(string userText)
     {
         if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
             throw new InvalidOperationException("session not started or already exited");
 
         var sw = Stopwatch.StartNew();
+        int forwardedMsgs = 0, chunkMsgs = 0; // PerfMetrics counts
+
+        // Baseline for this turn's shell diffs, taken in parallel with sending
+        // the message — claude needs seconds before its first tool runs.
+        _snapshotWork = PrepareSnapshotAsync(_snapshotWork);
+        var snapshotTurn = Volatile.Read(ref _snapshotTurn);
+        var toolChanges = new ToolChangeTracker(ReportChangesTools, SelfDiffTools);
 
         // Checkpoints for the perf.jsonl line (#22b) — mirrors the EmitTiming
         // calls below so the harness measures exactly what the timing chunks
@@ -1041,6 +1186,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
             JsonElement evt;
             try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
             catch { continue; }
+            if (TryHandleRemoteControlResponse(evt)) continue;
 
             // #22a: the type/subtype classification that used to live inline
             // here now lives in ClaudeStudioShared.StreamEventParser, unit
@@ -1057,6 +1203,18 @@ The user's IDE selection (if any) is included in the conversation context and ma
             thinkingActive = state.ThinkingActive;
             lastSyntheticText = state.LastSyntheticText;
 
+            // Auto mode: a tool the user already allowed for this session is
+            // answered here instead of popping the modal again.
+            if (result.PendingControlPerm is { } cp && _permissionMode == PermissionMode.Auto &&
+                result.Chunks.Find(c => c.Type == "permission_request" && c.ToolId == cp.ToolUseId) is { } prompt &&
+                prompt.Tool != "ExitPlanMode" && IsSessionAllowed?.Invoke(prompt.Tool ?? "") == true)
+            {
+                result.Chunks.Remove(prompt);
+                result.PendingControlPerm = null;
+                result.ControlAllowRequest = (cp.RequestId, cp.InputJson);
+                result.Chunks.Add(new ChatChunk { Type = "permission_auto", Tool = prompt.Tool, Text = "allowed for session" });
+            }
+
             foreach (var chunk in result.Chunks)
             {
                 if (firstChunk && chunk.Type == "chunk")
@@ -1065,8 +1223,16 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     EmitTiming("first chunk", firstChunkMs);
                     firstChunk = false;
                 }
+                forwardedMsgs++;
+                if (chunk.Type == "chunk") chunkMsgs++;
                 Console.WriteLine(JsonSerializer.Serialize(chunk));
                 Console.Out.Flush();
+
+                if (chunk.Type == "tool_use" && chunk.ToolId != null && chunk.Tool != null)
+                    toolChanges.Started(chunk.ToolId, chunk.Tool);
+                else if ((chunk.Type == "tool_result" || chunk.Type == "tool_error") && chunk.ToolId != null &&
+                         toolChanges.Finished(chunk.ToolId) is { } snap)
+                    _snapshotWork = ReportToolChangesAsync(_snapshotWork, snap.Report, chunk.ToolId, snap.Parallel, snapshotTurn);
             }
 
             if (result.PendingAsk is { } ask)
@@ -1115,6 +1281,19 @@ The user's IDE selection (if any) is included in the conversation context and ma
                         cacheRead = finalCacheRead
                     }
                 });
+                // ⚙ Performance metrics: durations and counts only — no text.
+                if (PerfMetrics)
+                    AppendPerfLog(new
+                    {
+                        ts = DateTime.UtcNow.ToString("o"),
+                        kind = "agent-turn",
+                        transport = "stdio",
+                        firstChunkMs,
+                        totalMs,
+                        forwardedMsgs,
+                        chunkMsgs
+                    });
+                await DrainSnapshotWorkAsync();
                 Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
                 Console.Out.Flush();
                 return;
@@ -1129,6 +1308,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
             Text = string.IsNullOrWhiteSpace(stderr) ? "claude session ended unexpectedly" : stderr.Trim()
         }));
         Console.Out.Flush();
+        Interlocked.Increment(ref _snapshotTurn); // claude is gone: drop pending diffs
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
         Console.Out.Flush();
     }
@@ -1185,7 +1365,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
     // quietErrors: failures go to the timing channel (extension OutputLog) instead
     // of a user-visible error bubble — for requests with a silent fallback, like
     // set_permission_mode (a failed switch just respawns).
-    private async Task<JsonElement?> SendControlRequestAsync(object request, string label, bool quietErrors = false)
+    // Bookkeeping requests answer at once; side_question (a model call) and
+    // mcp_reconnect (server start / auth) get SlowControlRequestTimeout.
+    private static readonly TimeSpan ControlRequestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SlowControlRequestTimeout = TimeSpan.FromMinutes(3);
+
+    private async Task<JsonElement?> SendControlRequestAsync(object request, string label, bool quietErrors = false, TimeSpan? timeoutAfter = null)
     {
         if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
             throw new InvalidOperationException("session not started or already exited");
@@ -1201,13 +1386,25 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
         finally { _stdinLock.Release(); }
 
+        // A claude that never answers must not wedge the request loop for good.
+        var limit = timeoutAfter ?? ControlRequestTimeout;
+        using var timeout = new CancellationTokenSource(limit);
         string? line;
-        while ((line = await _stdout.ReadLineAsync()) != null)
+        while (true)
         {
+            try { line = await _stdout.ReadLineAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = quietErrors ? "timing" : "error", Text = $"{label}: claude did not respond in {limit.TotalSeconds:0} s" }));
+                Console.Out.Flush();
+                return null;
+            }
+            if (line == null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
             JsonElement evt;
             try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
             catch { continue; }
+            if (TryHandleRemoteControlResponse(evt)) continue;
             if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
             if (!evt.TryGetProperty("response", out var resp)) continue;
             if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
@@ -1230,6 +1427,79 @@ The user's IDE selection (if any) is included in the conversation context and ma
         return null;
     }
 
+    // Remote Control state of this claude process (off until switched on).
+    public bool RemoteControlOn { get; private set; }
+
+    public async Task SetRemoteControlAsync(bool enabled)
+    {
+        // quietErrors: the reason goes to the log; the UI shows a failed toggle,
+        // not an error bubble in the middle of the user's turn.
+        var resp = await SendControlRequestAsync(new { subtype = "remote_control", enabled }, "remote-control", quietErrors: true);
+        object result;
+        if (resp == null)
+            result = new { enabled = RemoteControlOn, error = "failed" };
+        else
+        {
+            RemoteControlOn = enabled;
+            var url = enabled && resp.Value.TryGetProperty("session_url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null;
+            result = new { enabled, url };
+        }
+        EmitRemoteControlResult(result);
+    }
+
+    // Mid-turn Remote Control switch (ChatRequest.RemoteControlLive): only the
+    // write happens here; the answer is picked up by whichever loop reads
+    // claude's stdout next, via TryHandleRemoteControlResponse.
+    private string? _liveRemoteControlId;
+    private bool _liveRemoteControlEnabled;
+
+    public async Task SendRemoteControlLiveAsync(bool enabled)
+    {
+        if (_stdin == null) throw new InvalidOperationException("session not started");
+        var requestId = "remote-control-live-" + Guid.NewGuid().ToString("N");
+        _liveRemoteControlEnabled = enabled;
+        Volatile.Write(ref _liveRemoteControlId, requestId);
+        var ndjson = JsonSerializer.Serialize(new { type = "control_request", request_id = requestId, request = new { subtype = "remote_control", enabled } });
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
+    }
+
+    private bool TryHandleRemoteControlResponse(JsonElement evt)
+    {
+        var pending = Volatile.Read(ref _liveRemoteControlId);
+        if (pending == null ||
+            !evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response" ||
+            !evt.TryGetProperty("response", out var resp) ||
+            !resp.TryGetProperty("request_id", out var rid) || rid.GetString() != pending)
+            return false;
+        _liveRemoteControlId = null;
+        var enabled = _liveRemoteControlEnabled;
+        if (resp.TryGetProperty("subtype", out var st) && st.GetString() == "error")
+        {
+            var err = resp.TryGetProperty("error", out var e) ? e.GetString() : "failed";
+            EmitRemoteControlResult(new { enabled = RemoteControlOn, error = "failed" }, $"remote-control: {err}");
+            return true;
+        }
+        RemoteControlOn = enabled;
+        var url = enabled && resp.TryGetProperty("response", out var rr) && rr.TryGetProperty("session_url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null;
+        EmitRemoteControlResult(new { enabled, url });
+        return true;
+    }
+
+    // logText goes to the timing channel (extension OutputLog), never to the chat.
+    public static void EmitRemoteControlResult(object result, string? logText = null)
+    {
+        if (logText != null)
+            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = logText }));
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "remote-control-result", Text = JsonSerializer.Serialize(result) }));
+        Console.Out.Flush();
+    }
+
     public async Task GetMcpStatusAsync()
     {
         var resp = await SendControlRequestAsync(new { subtype = "mcp_status" }, "mcp-status");
@@ -1241,7 +1511,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
     public async Task ReconnectMcpServerAsync(string serverName)
     {
-        var resp = await SendControlRequestAsync(new { subtype = "mcp_reconnect", serverName }, "mcp-reconnect");
+        var resp = await SendControlRequestAsync(new { subtype = "mcp_reconnect", serverName }, "mcp-reconnect", timeoutAfter: SlowControlRequestTimeout);
         if (resp == null) return;
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "mcp-reconnect-result", Text = serverName }));
         Console.Out.Flush();
@@ -1251,7 +1521,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
     // main transcript. The inner response is {response: string|null, synthetic}.
     public async Task AskSideQuestionAsync(string question)
     {
-        var resp = await SendControlRequestAsync(new { subtype = "side_question", question }, "side-question");
+        var resp = await SendControlRequestAsync(new { subtype = "side_question", question }, "side-question", timeoutAfter: SlowControlRequestTimeout);
         if (resp == null) return;
         string answer = "";
         if (resp.Value.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.String)
@@ -1328,7 +1598,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
         catch { }
     }
 
-    private object BuildHooks()
+    private object BuildHooks(bool gateTools)
     {
         var agentPath = Environment.ProcessPath
             ?? throw new InvalidOperationException("cannot resolve agent executable path");
@@ -1336,6 +1606,23 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // PoC confirmed: paths in settings.json must use forward slashes — claude's
         // shell layer interprets backslashes as escape characters and strips them.
         var agentPathFwd = agentPath.Replace('\\', '/');
+
+        // After a file edit, pull the VS Error List for that file and feed
+        // any errors/warnings back to claude as additionalContext so it can
+        // self-correct. Informational only — the hook never blocks.
+        var postToolUse = new[]
+        {
+            new
+            {
+                matcher = "Edit|Write|MultiEdit|NotebookEdit",
+                hooks = new[]
+                {
+                    new { type = "command", command = $"\"{agentPathFwd}\" --hook-post {_pipeName}" }
+                }
+            }
+        };
+
+        if (!gateTools) return new { PostToolUse = postToolUse };
 
         return new
         {
@@ -1390,20 +1677,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     }
                 }
             },
-            // After a file edit, pull the VS Error List for that file and feed
-            // any errors/warnings back to claude as additionalContext so it can
-            // self-correct. Informational only — the hook never blocks.
-            PostToolUse = new[]
-            {
-                new
-                {
-                    matcher = "Edit|Write|MultiEdit|NotebookEdit",
-                    hooks = new[]
-                    {
-                        new { type = "command", command = $"\"{agentPathFwd}\" --hook-post {_pipeName}" }
-                    }
-                }
-            }
+            PostToolUse = postToolUse
         };
     }
 
@@ -1437,10 +1711,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
     // Writes the settings.json passed to claude via --settings. Includes the hooks
     // block only when requested (ask mode with a pipe), plus any user-configured
     // claude settings (all modes). Returns null when there's nothing to write.
-    private string? WriteSettings(bool includeHooks)
+    // gateTools=false (Auto mode) leaves out the PreToolUse permission gate and
+    // keeps only the PostToolUse diagnostics hook.
+    private string? WriteSettings(bool includeHooks, bool gateTools = true)
     {
         var settings = BuildClaudeSettings();
-        if (includeHooks) settings["hooks"] = BuildHooks();
+        if (includeHooks) settings["hooks"] = BuildHooks(gateTools);
         if (settings.Count == 0) return null;
 
         _settingsTempDir = Path.Combine(Path.GetTempPath(), $"claudestudio-{Environment.ProcessId}-{Guid.NewGuid():N}");
@@ -1530,6 +1806,11 @@ The user's IDE selection (if any) is included in the conversation context and ma
             _stdin = null;
             _stdout = null;
             _proc = null;
+
+            Interlocked.Increment(ref _snapshotTurn);
+            try { await Task.WhenAny(_snapshotWork, Task.Delay(SnapshotDrainTimeout)); } catch { } // don't pull the index from under a running git
+            _snapshot?.Dispose();
+            _snapshot = null;
 
             if (_settingsTempDir != null)
             {

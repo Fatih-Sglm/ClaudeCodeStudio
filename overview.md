@@ -15,7 +15,7 @@ Unlike terminal-embedding extensions, Claude Code Studio does **not** host a con
 
 ### Permissions & modes
 - **Inline permission prompts** — tool calls that need approval surface a modal with **Allow**, **Allow for session**, and **Deny**, showing the working directory the call runs in. Backed by a `PreToolUse` hook over a named pipe, not a terminal prompt.
-- **Permission modes** — switch between **ask**, **plan** (Exit Plan Mode becomes an explicit "Approve plan" modal), **bypass permissions** (yolo), and **don't ask** (read-only: reads and searches run freely, all edits are blocked by the CLI).
+- **Permission modes** — the same four as the VS Code extension: **Manual** (asks before each edit or command), **Edit automatically** (workspace edits run without asking, commands still ask), **Plan** (Exit Plan Mode becomes an explicit "Approve plan" modal), and **Auto** (the CLI's safety check approves routine actions; anything it pauses on opens the permission modal). **Bypass permissions** is also available, set apart and marked dangerous: every tool runs without asking.
 - **Permission rules** — allow / deny / ask rules honored per session.
 
 ### Diffs, rewind & branching

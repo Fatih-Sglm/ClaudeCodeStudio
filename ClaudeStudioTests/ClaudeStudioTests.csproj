@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ClaudeStudioShared\ClaudeStudioShared.csproj" />
+    <ProjectReference Include="..\ClaudeStudioAgent\ClaudeStudioAgent.csproj" />
   </ItemGroup>
 
 </Project>

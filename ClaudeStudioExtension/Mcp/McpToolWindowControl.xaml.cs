@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using ClaudeStudioExtension.Localization;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.PlatformUI;
 
@@ -35,7 +37,19 @@ public partial class McpToolWindowControl : UserControl
     // resolved palette onto the standalone static brushes the server rows are built
     // from (safe: those never enter a ResourceDictionary, so mutating them is fine).
     // NativeTheme.Changed fires for both a VS theme switch and an appearance change.
-    private void OnThemeChanged() => Dispatcher.Invoke(ApplyTheme);
+    private void OnThemeChanged() => Dispatcher.Invoke(() =>
+    {
+        ApplyTheme();
+        ApplyLanguage();
+    });
+
+    private void ApplyLanguage()
+    {
+        if (TemplateCombo.Items.Count > 0 && TemplateCombo.Items[0] is ComboBoxItem custom) custom.Content = Strings.Get("mcp.customTemplate");
+        if (_editing != null) EditTitle.Text = _isNew ? Strings.Get("mcp.newServer") : Strings.Format("mcp.editTitle", _editing.Name);
+        UpdateScopePathLabel();
+        RenderList();
+    }
 
     private void ApplyTheme()
     {
@@ -63,6 +77,7 @@ public partial class McpToolWindowControl : UserControl
 
         foreach (var t in McpTemplates.All)
             TemplateCombo.Items.Add(new ComboBoxItem { Content = t.Label, Tag = t });
+        ((ComboBoxItem)TemplateCombo.Items[0]).Content = Strings.Get("mcp.customTemplate");
         TemplateCombo.SelectedIndex = 0;
 
         Loaded += (_, _) =>
@@ -90,11 +105,19 @@ public partial class McpToolWindowControl : UserControl
 #pragma warning restore VSTHRD010
     }
 
-    public void Refresh()
+    // Callers stay fire-and-forget; the config file (~/.claude.json can be many
+    // MB) is read and parsed off the UI thread.
+    public void Refresh() => _ = RefreshAsync();
+
+    // Overlapping refreshes (open, scope switch, save): only the newest applies.
+    private int _refreshGen;
+
+    private async Task RefreshAsync()
     {
+        var gen = ++_refreshGen;
         try
         {
-            CaptureCurrentCwd();
+            CaptureCurrentCwd(); // DTE: UI thread
 
             if (_scope == McpScope.Project && string.IsNullOrEmpty(_projectDir))
             {
@@ -105,7 +128,11 @@ public partial class McpToolWindowControl : UserControl
                 return;
             }
 
-            _servers = McpConfigStore.Load(_scope, _projectDir);
+            var scope = _scope;
+            var projectDir = _projectDir;
+            var servers = await Task.Run(() => McpConfigStore.Load(scope, projectDir));
+            if (gen != _refreshGen) return;
+            _servers = servers;
             UpdateScopePathLabel();
 
             if (_editing != null && !_isNew)
@@ -125,10 +152,11 @@ public partial class McpToolWindowControl : UserControl
         }
         catch (Exception ex)
         {
+            if (gen != _refreshGen) return;
             ServerListPanel.Children.Clear();
             ServerListPanel.Children.Add(new TextBlock
             {
-                Text = "Error loading: " + ex.Message,
+                Text = Strings.Format("mcp.errorLoading", ex.Message),
                 Foreground = MutedBrush,
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap,
@@ -142,13 +170,13 @@ public partial class McpToolWindowControl : UserControl
         {
             if (_scope == McpScope.Project && string.IsNullOrEmpty(_projectDir))
             {
-                ScopePathLabel.Text = "No solution open. Project scope unavailable.";
+                ScopePathLabel.Text = Strings.Get("mcp.noSolution");
                 BtnAdd.IsEnabled = false;
                 return;
             }
             BtnAdd.IsEnabled = true;
             var path = McpConfigStore.GetPath(_scope, _projectDir);
-            ScopePathLabel.Text = path + (File.Exists(path) ? "" : "  (will be created)");
+            ScopePathLabel.Text = path + (File.Exists(path) ? "" : Strings.Get("mcp.willBeCreated"));
         }
         catch (Exception ex)
         {
@@ -164,7 +192,7 @@ public partial class McpToolWindowControl : UserControl
         {
             ServerListPanel.Children.Add(new TextBlock
             {
-                Text = "No MCP servers configured.",
+                Text = Strings.Get("mcp.noServers"),
                 Foreground = MutedBrush,
                 FontSize = 11,
                 Margin = new Thickness(4, 8, 0, 0),
@@ -186,8 +214,8 @@ public partial class McpToolWindowControl : UserControl
         };
 
         var subtitle = s.Transport == McpTransport.Stdio
-            ? (string.IsNullOrEmpty(s.Command) ? "(no command)" : s.Command)
-            : (string.IsNullOrEmpty(s.Url) ? "(no url)" : s.Url);
+            ? (string.IsNullOrEmpty(s.Command) ? Strings.Get("mcp.noCommand") : s.Command)
+            : (string.IsNullOrEmpty(s.Url) ? Strings.Get("mcp.noUrl") : s.Url);
 
         var stack = new StackPanel { Orientation = Orientation.Vertical };
         if (s.Disabled) stack.Opacity = 0.5;
@@ -230,7 +258,7 @@ public partial class McpToolWindowControl : UserControl
                 VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock
                 {
-                    Text = "disabled",
+                    Text = Strings.Get("mcp.disabled"),
                     Foreground = MutedBrush,
                     FontSize = 9,
                     Typography = { Capitals = FontCapitals.AllSmallCaps },
@@ -300,7 +328,7 @@ public partial class McpToolWindowControl : UserControl
         _editing = s;
         _isNew = isNew;
 
-        EditTitle.Text = isNew ? "New server" : "Edit: " + s.Name;
+        EditTitle.Text = isNew ? Strings.Get("mcp.newServer") : Strings.Format("mcp.editTitle", s.Name);
         TemplateCombo.Visibility = Visibility.Visible;
         TemplateCombo.IsEnabled = isNew;
         TemplateCombo.SelectedIndex = isNew ? 0 : McpTemplates.DetectIndex(s);
@@ -412,7 +440,7 @@ public partial class McpToolWindowControl : UserControl
 
         var eye = new Button
         {
-            Content = "show",
+            Content = Strings.Get("mcp.show"),
             Width = 44,
             Margin = new Thickness(4, 0, 0, 0),
             FontSize = 10,
@@ -437,7 +465,7 @@ public partial class McpToolWindowControl : UserControl
                     v.Visibility = Visibility.Collapsed;
                     pb.Visibility = Visibility.Visible;
                 }
-                eye.Content = "show";
+                eye.Content = Strings.Get("mcp.show");
             }
             else
             {
@@ -447,7 +475,7 @@ public partial class McpToolWindowControl : UserControl
                     pb.Visibility = Visibility.Collapsed;
                     v.Visibility = Visibility.Visible;
                 }
-                eye.Content = secret ? "hide" : "show";
+                eye.Content = Strings.Get(secret ? "mcp.hide" : "mcp.show");
             }
         }
 
@@ -494,10 +522,10 @@ public partial class McpToolWindowControl : UserControl
             }
             if (string.IsNullOrWhiteSpace(k))
             {
-                if (!string.IsNullOrEmpty(v)) return (map, $"Empty {label} key");
+                if (!string.IsNullOrEmpty(v)) return (map, Strings.Format("mcp.emptyKey", label));
                 continue;
             }
-            if (map.ContainsKey(k!)) return (map, $"Duplicate {label}: {k}");
+            if (map.ContainsKey(k!)) return (map, Strings.Format("mcp.duplicateKey", label, k!));
             map[k!] = v ?? "";
         }
         return (map, null);
@@ -514,7 +542,7 @@ public partial class McpToolWindowControl : UserControl
 
         if (_isNew && _servers.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
         {
-            ErrorLabel.Text = "A server with this name already exists";
+            ErrorLabel.Text = Strings.Get("mcp.nameExists");
             return;
         }
 
@@ -527,28 +555,28 @@ public partial class McpToolWindowControl : UserControl
         if (transport == McpTransport.Stdio)
         {
             draft.Command = CommandBox.Text.Trim();
-            if (string.IsNullOrEmpty(draft.Command)) { ErrorLabel.Text = "Command is required"; return; }
+            if (string.IsNullOrEmpty(draft.Command)) { ErrorLabel.Text = Strings.Get("mcp.commandRequired"); return; }
             draft.Args = (ArgsBox.Text ?? "")
                 .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim())
                 .Where(x => x.Length > 0)
                 .ToList();
-            var (env, envErr) = ReadKvList(EnvList, "env var");
+            var (env, envErr) = ReadKvList(EnvList, Strings.Get("mcp.kvEnv"));
             if (envErr != null) { ErrorLabel.Text = envErr; return; }
             draft.Env = env;
         }
         else
         {
             draft.Url = UrlBox.Text.Trim();
-            if (string.IsNullOrEmpty(draft.Url)) { ErrorLabel.Text = "URL is required"; return; }
+            if (string.IsNullOrEmpty(draft.Url)) { ErrorLabel.Text = Strings.Get("mcp.urlRequired"); return; }
             if (!Uri.TryCreate(draft.Url, UriKind.Absolute, out var uri) ||
                 string.IsNullOrEmpty(uri.Authority) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
-                ErrorLabel.Text = "URL must be a valid http or https URL (e.g. https://example.com)";
+                ErrorLabel.Text = Strings.Get("mcp.urlInvalid");
                 return;
             }
-            var (hdrs, hdrErr) = ReadKvList(HeadersList, "header");
+            var (hdrs, hdrErr) = ReadKvList(HeadersList, Strings.Get("mcp.kvHeader"));
             if (hdrErr != null) { ErrorLabel.Text = hdrErr; return; }
             draft.Headers = hdrs;
         }
@@ -580,14 +608,14 @@ public partial class McpToolWindowControl : UserControl
         }
         catch (Exception ex)
         {
-            ErrorLabel.Text = "Save failed: " + ex.Message;
+            ErrorLabel.Text = Strings.Format("mcp.saveFailed", ex.Message);
         }
     }
 
     private void OnDeleteClick(object sender, RoutedEventArgs e)
     {
         if (_editing == null || _isNew) return;
-        var result = MessageBox.Show($"Delete server '{_editing.Name}'?", "Confirm delete",
+        var result = MessageBox.Show(Strings.Format("mcp.deleteConfirm", _editing.Name), Strings.Get("mcp.deleteConfirmTitle"),
             MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (result != MessageBoxResult.Yes) return;
 
@@ -601,7 +629,7 @@ public partial class McpToolWindowControl : UserControl
         }
         catch (Exception ex)
         {
-            ErrorLabel.Text = "Delete failed: " + ex.Message;
+            ErrorLabel.Text = Strings.Format("mcp.deleteFailed", ex.Message);
         }
     }
 }

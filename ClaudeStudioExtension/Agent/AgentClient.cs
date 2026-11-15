@@ -64,6 +64,17 @@ public class AgentClient
     public void CancelCurrent()
     {
         OutputLog.Info("request cancel requested");
+        // The cancel kills claude. Without --resume the next message started a
+        // brand-new session and silently lost the conversation, so continue the
+        // cancelled one — only when a turn was really running (an idle cancel
+        // must not respawn a live session) and its transcript exists (a turn
+        // killed before claude wrote anything has nothing to resume).
+        if (IsStreaming && PendingResumeSessionId == null && CurrentSessionId is { } cancelledId)
+        {
+            var transcript = _jsonlWatcher.FilePath;
+            if (transcript != null && Path.GetFileNameWithoutExtension(transcript) == cancelledId && File.Exists(transcript))
+                PendingResumeSessionId = cancelledId;
+        }
         _cancelTcs?.TrySetResult(true);
         // Hard cancel on the agent side so the read loop unblocks and the next
         // request can start without "stream in use" errors. Fire-and-forget —
@@ -101,6 +112,7 @@ public class AgentClient
             _process = null;
             _writer = null;
             _reader = null;
+            Endpoint = null;
         }
 
         var agentPath = GetAgentPath();
@@ -142,15 +154,53 @@ public class AgentClient
 
         var ready = await _reader.ReadLineAsync();
 
-        if (ready != "READY")
+        // READY {"port":…,"token":…} — the token is a secret, so the line itself
+        // never reaches the log or the error text, only a description of it.
+        if (!TryParseReady(ready, out var port, out var token))
         {
-            OutputLog.Error($"agent failed to signal READY (got: {ready ?? "NULL"})");
+            var shown = ready == null ? "NULL"
+                : ready.StartsWith("READY", StringComparison.Ordinal) ? $"malformed READY line ({ready.Length} chars)"
+                : ready;
+            OutputLog.Error($"agent failed to signal READY (got: {shown})");
             throw new Exception(
                 $"ClaudeStudioAgent failed to start.\n" +
-                $"Response: {ready ?? "NULL"}");
+                $"Response: {shown}");
         }
 
-        OutputLog.Info($"agent started (pid {_process.Id})");
+        Endpoint = new AgentEndpoint(port, token!, ++_epoch);
+        OutputLog.Info($"agent started (pid {_process.Id}, socket port {port}, epoch {_epoch})");
+        OnAgentStarted?.Invoke();
+    }
+
+    // Webview socket endpoint of the running agent; null while none is running.
+    // Epoch grows with every agent start so the webview can drop a stale socket.
+    public sealed class AgentEndpoint
+    {
+        public AgentEndpoint(int port, string token, int epoch) { Port = port; Token = token; Epoch = epoch; }
+        public int Port { get; }
+        public string Token { get; }
+        public int Epoch { get; }
+    }
+
+    public AgentEndpoint? Endpoint { get; private set; }
+    private int _epoch;
+
+    // Fired after every agent (re)start with a fresh Endpoint.
+    public Action? OnAgentStarted { get; set; }
+
+    private static bool TryParseReady(string? line, out int port, out string? token)
+    {
+        port = 0;
+        token = null;
+        if (line == null || !line.StartsWith("READY ", StringComparison.Ordinal)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(line.Substring(6));
+            port = doc.RootElement.GetProperty("port").GetInt32();
+            token = doc.RootElement.GetProperty("token").GetString();
+            return port > 0 && !string.IsNullOrEmpty(token);
+        }
+        catch { return false; }
     }
 
     public async Task SendPermissionResponseAsync(string toolUseId, bool allow, string? reason, string? allowSession = null)
@@ -332,6 +382,54 @@ public class AgentClient
 
     // One-shot MCP status probe (V20): returns (serversJson, error) where
     // serversJson is the live session's mcpServers array.
+    // Composer's Remote Control switch; rides on every chat request so a new or
+    // respawned claude comes up the same way.
+    public bool RemoteControl { get; set; }
+
+    // Flips Remote Control on the live claude. With no agent running yet the
+    // choice just waits for the next chat request (reported as pending).
+    public async Task<(string? resultJson, string? error)> SetRemoteControlAsync(bool enabled)
+    {
+        RemoteControl = enabled;
+
+        // Mid-turn: the turn holds the semaphore, so don't wait for it. The agent
+        // answers inside the running turn's stream (remote-control-result via
+        // onTool); until then the switch shows as pending.
+        if (IsStreaming && _writer != null)
+        {
+            var live = new ChatRequest { Message = "", RemoteControlToggle = enabled, RemoteControlLive = true };
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(live));
+            await _writer.FlushAsync();
+            return (JsonSerializer.Serialize(new { enabled, pending = true }), null);
+        }
+
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            if (_writer == null || _reader == null)
+                return (JsonSerializer.Serialize(new { enabled, pending = true }), null);
+
+            var request = new ChatRequest { Message = "", RemoteControlToggle = enabled };
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await _writer.FlushAsync();
+
+            string? resultJson = null;
+            string? error = null;
+            string? line;
+            while ((line = await _reader.ReadLineAsync()) != null)
+            {
+                var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                if (chunk == null) continue;
+                if (chunk.Type == "remote-control-result") resultJson = chunk.Text;
+                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"remote-control error: {chunk.Text}"); }
+                else if (chunk.Type == "timing") OutputLog.Info($"timing: {chunk.Text}");
+                else if (chunk.Type == "done") break;
+            }
+            return (resultJson, error);
+        }
+        finally { _streamingSemaphore.Release(); }
+    }
+
     public async Task<(string? serversJson, string? error)> GetMcpStatusAsync()
     {
         await _streamingSemaphore.WaitAsync();
@@ -424,7 +522,12 @@ public class AgentClient
     // (claude is appending to the same file mid-turn).
     public bool IsStreaming { get; private set; }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null, Action<string, string>? onPermissionResolved = null)
+    // Whether the last AskStreamingAsync ended through a cancel (■). Its late
+    // "done" still arrives after the cancel's own stream-done, and must not
+    // read as a completed turn (the page sends queued messages on completion).
+    public bool LastTurnCancelled { get; private set; }
+
+    public async Task AskStreamingAsync(string message, string model, string? effort, PermissionMode permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null, Action<string, string>? onPermissionResolved = null)
     {
         await _streamingSemaphore.WaitAsync();
         IsStreaming = true;
@@ -439,7 +542,7 @@ public class AgentClient
         }
     }
 
-    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null, Action<string, string>? onPermissionResolved = null)
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, PermissionMode permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null, Action<string, string>? onPermissionResolved = null)
     {
         // A send can queue on the semaphore behind a stuck turn; by the time it
         // runs here, a clear/stop may have nulled the streams (rodada 12: NRE at
@@ -500,6 +603,7 @@ public class AgentClient
             AutoResume = autoResume,
             ClaudeSettings = ClaudeSettings,
             CliPath = CliPath,
+            RemoteControl = RemoteControl,
             MaxBudgetUsd = maxBudgetUsd,
             FallbackModel = fallbackModel,
             // U2: when resuming a session whose custom title we know, pass it
@@ -739,6 +843,24 @@ public class AgentClient
             if (chunk.Type == "chunk" && !string.IsNullOrEmpty(chunk.Text))
                 onChunk(chunk.Text);
 
+            // Files a shell/subagent tool changed (Text = unified git diff) —
+            // same onTool piggyback as rate-limit/model-used.
+            // Remote Control: switched before the message went out, or its link
+            // status changed mid-turn — same onTool piggyback.
+            if (chunk.Type == "remote-control-result" || chunk.Type == "remote-state")
+            {
+                OutputLog.Info($"{chunk.Type}: {chunk.Text}");
+                onTool?.Invoke(chunk.Type, "", null, chunk.Text, null);
+                continue;
+            }
+
+            if (chunk.Type == "tool_files")
+            {
+                OutputLog.Info($"tool_files: id={chunk.ToolId ?? "-"} bytes={chunk.Text?.Length ?? 0}");
+                onTool?.Invoke("tool_files", chunk.Tool ?? "", null, chunk.Text, chunk.ToolId);
+                continue;
+            }
+
             if (chunk.Type == "tool_use" || chunk.Type == "tool_result" || chunk.Type == "tool_error")
             {
                 OutputLog.Info($"{chunk.Type}: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"} bytes={(chunk.ToolInput ?? chunk.Text ?? "").Length}");
@@ -778,6 +900,7 @@ public class AgentClient
         }
 
         _cancelTcs = null;
+        LastTurnCancelled = cancelled;
     }
 
     private string? _watcherSessionId;
@@ -813,6 +936,7 @@ public class AgentClient
         var proc = _process;
         if (proc == null) return;
         _process = null; // claim it — subsequent callers see null and bail out
+        Endpoint = null; // its socket dies with the process
 
         // Claim the streams too, atomically with _process. Killing the agent can
         // take seconds (WaitForExit timeout), during which a `clear` may already

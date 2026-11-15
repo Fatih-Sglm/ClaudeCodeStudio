@@ -19,6 +19,11 @@ namespace ClaudeStudioExtension;
 public partial class AgentToolWindowControl : UserControl
 {
     private readonly AgentClient _agentClient = new();
+    // "/" command list + plugins panel (Agent/CliCatalogHandler.cs).
+    private CliCatalogHandler? _cliCatalog;
+    private CliCatalogHandler CliCatalog => _cliCatalog ??= new CliCatalogHandler(
+        () => _agentClient.CliPath,
+        json => _ = Dispatcher.InvokeAsync(() => Browser?.CoreWebView2?.PostWebMessageAsJson(json)));
 
     // Created here instead of in XAML so the type binds to the exact
     // Microsoft.Web.WebView2.Wpf version this extension references. A XAML
@@ -77,6 +82,8 @@ public partial class AgentToolWindowControl : UserControl
         IsVisibleChanged += AgentToolWindowControl_IsVisibleChanged;
 
         AgentToolWindowCommand.ActiveControl = this;
+
+        _agentClient.OnAgentStarted = PostAgentEndpoint;
 
         // One-shot cleanup of stale pasted images/files. Runs once per VS
         // session in the background — these files accumulate in %TEMP%/ClaudeStudio
@@ -140,6 +147,42 @@ public partial class AgentToolWindowControl : UserControl
             // (CLI write patterns vary; safer to also re-poll on focus return).
             _ = Task.Run(() => { try { SendAccountInfo(); } catch { } });
         }
+    }
+
+    // Hands the webview the running agent's socket endpoint. Sent after every
+    // agent (re)start — each one has a new port/token — and after a webview
+    // reload. Nobody waits on the result, so no synchronous Invoke.
+    private void PostAgentEndpoint()
+    {
+        var ep = _agentClient.Endpoint;
+        if (ep == null) return;
+        var json = JsonSerializer.Serialize(new { type = "agent-endpoint", port = ep.Port, token = ep.Token, epoch = ep.Epoch });
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            try { Browser?.CoreWebView2?.PostWebMessageAsJson(json); }
+            catch { /* webview tearing down */ }
+        });
+    }
+
+    // ⚙ Performance metrics: one record per turn ("ui-turn" from the webview,
+    // "vs-turn" from this control). Only numeric fields are kept (the map's
+    // value type enforces it) — no text.
+    private static void AppendPerfRecord(string kind, Dictionary<string, double>? metrics)
+    {
+        if (metrics == null) return;
+        try
+        {
+            var record = new Dictionary<string, object> { ["ts"] = DateTime.UtcNow.ToString("o"), ["kind"] = kind };
+            // decimal: net472's double serializer prints 7300.8 as 7300.8000000000002.
+            foreach (var kv in metrics) record[kv.Key] = Math.Round((decimal)kv.Value, 1);
+            var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeStudio");
+            Directory.CreateDirectory(dir);
+            // The agent appends to the same file; share it rather than lock it.
+            using var fs = new FileStream(System.IO.Path.Combine(dir, "perf.jsonl"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            var bytes = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(record) + Environment.NewLine);
+            fs.Write(bytes, 0, bytes.Length);
+        }
+        catch (Exception ex) { OutputLog.Warn($"perf record failed: {ex.Message}"); }
     }
 
     public void FocusTextarea()
@@ -226,12 +269,15 @@ public partial class AgentToolWindowControl : UserControl
             var versionString = $"{version?.Major}.{version?.Minor}.{version?.Build}";
             Browser.CoreWebView2.PostWebMessageAsJson(
                 JsonSerializer.Serialize(new { type = "version", text = versionString }));
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "ui-language", lang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName }));
 
             SendCurrentTheme();
             StartClaudeJsonWatcher();  // seeds _lastSignedInStatus before first SendAccountInfo
             StartTrustedWorkspacesWatcher();
             SendAccountInfo();
             SendCwdInfo();
+            PostAgentEndpoint(); // reload: the page lost its socket, the agent didn't
         };
 
         // U4: whenever the agent (re)spawns claude, re-point the presence
@@ -1189,6 +1235,14 @@ public partial class AgentToolWindowControl : UserControl
             if (request == null)
                 return;
 
+            // Before the DTE/cwd work below — it's a metrics write, nothing more.
+            if (request.Type == "perf-ui")
+            {
+                var metrics = request.Metrics;
+                _ = Task.Run(() => AppendPerfRecord("ui-turn", metrics));
+                return;
+            }
+
             string? currentSolutionDir = null;
 #pragma warning disable VSTHRD010
             try
@@ -1346,7 +1400,8 @@ public partial class AgentToolWindowControl : UserControl
                 new Theming.AppearanceSettings
                 {
                     ThemeMode = string.IsNullOrWhiteSpace(request.ThemeMode) ? "auto" : request.ThemeMode!.Trim(),
-                    Accent = string.IsNullOrWhiteSpace(request.Accent) ? null : request.Accent!.Trim()
+                    Accent = string.IsNullOrWhiteSpace(request.Accent) ? null : request.Accent!.Trim(),
+                    UiLanguage = string.IsNullOrWhiteSpace(request.UiLanguage) ? "auto" : request.UiLanguage!.Trim()
                 }.Save();
                 Theming.NativeTheme.NotifyChanged();
                 return;
@@ -1359,7 +1414,7 @@ public partial class AgentToolWindowControl : UserControl
                 VsStatusBar.Clear();
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "stream-done" })));
+                        JsonSerializer.Serialize(new { type = "stream-done", turnSeq = request.TurnSeq })));
                 return;
             }
 
@@ -1515,6 +1570,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == CliCatalogHandler.PluginMsg.List || request.Type == CliCatalogHandler.PluginMsg.Action)
+            {
+                _ = CliCatalog.HandlePluginRequestAsync(request.Type, request.PluginAction, request.PluginTarget, request.PluginScope, _lastWorkingDir ?? currentSolutionDir);
+                return;
+            }
+
             if (request.Type == "unfocus")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -1588,6 +1649,16 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "remote-control")
+            {
+                string? rcResult = null, rcError = null;
+                try { (rcResult, rcError) = await _agentClient.SetRemoteControlAsync(request.Enabled == true); }
+                catch (Exception ex) { rcError = ex.Message; }
+                var rcJson = JsonSerializer.Serialize(new { type = "remote-control-result", text = rcResult, error = rcError });
+                _ = Dispatcher.InvokeAsync(() => Browser?.CoreWebView2?.PostWebMessageAsJson(rcJson));
+                return;
+            }
+
             if (request.Type == "get-context-usage")
             {
                 await HandleContextUsageAsync();
@@ -1596,7 +1667,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "get-slash-commands")
             {
-                await HandleGetSlashCommandsAsync(_lastWorkingDir ?? currentSolutionDir);
+                await CliCatalog.SendSlashCommandsAsync(_lastWorkingDir ?? currentSolutionDir);
                 return;
             }
 
@@ -1648,7 +1719,7 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "side-question")
             {
                 string? sqAnswer = null, sqError = null;
-                if (string.IsNullOrWhiteSpace(request.Text)) sqError = "empty question";
+                if (string.IsNullOrWhiteSpace(request.Text)) sqError = Localization.Strings.Get("sideq.empty");
                 else (sqAnswer, sqError) = await _agentClient.AskSideQuestionAsync(request.Text);
                 var sqDispatcher = System.Windows.Application.Current.Dispatcher;
                 sqDispatcher.Invoke(() =>
@@ -1660,7 +1731,7 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "mcp-reconnect")
             {
                 var reconnectErr = string.IsNullOrEmpty(request.Text)
-                    ? "missing server name"
+                    ? Localization.Strings.Get("mcp.missingServer")
                     : await _agentClient.ReconnectMcpServerAsync(request.Text);
                 var rcDispatcher = System.Windows.Application.Current.Dispatcher;
                 rcDispatcher.Invoke(() =>
@@ -1690,7 +1761,7 @@ public partial class AgentToolWindowControl : UserControl
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "auth-required" }));
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                        JsonSerializer.Serialize(new { type = "stream-done", turnSeq = request.TurnSeq }));
                 });
                 return;
             }
@@ -1707,7 +1778,7 @@ public partial class AgentToolWindowControl : UserControl
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "no-workspace", path = workingDir }));
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                        JsonSerializer.Serialize(new { type = "stream-done", turnSeq = request.TurnSeq }));
                 });
                 return;
             }
@@ -1726,7 +1797,7 @@ public partial class AgentToolWindowControl : UserControl
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "trust-required", path = workingDir, parent, parentIsBlocked, riskWarning }));
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                        JsonSerializer.Serialize(new { type = "stream-done", turnSeq = request.TurnSeq }));
                 });
                 return;
             }
@@ -1743,7 +1814,7 @@ public partial class AgentToolWindowControl : UserControl
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "mcp-trust-required", servers = pendingMcp }));
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                        JsonSerializer.Serialize(new { type = "stream-done", turnSeq = request.TurnSeq }));
                 });
                 return;
             }
@@ -1757,7 +1828,7 @@ public partial class AgentToolWindowControl : UserControl
                     var blockJson = JsonSerializer.Serialize(new
                     {
                         type = "cost-warning",
-                        text = preLimits.BuildWarning(sCost, dCost) ?? "limit reached",
+                        text = preLimits.BuildWarning(sCost, dCost) ?? Localization.Strings.Get("cost.limitReached"),
                         blocked = true,
                         sessionCost = sCost,
                         dailyCost = dCost,
@@ -1769,7 +1840,7 @@ public partial class AgentToolWindowControl : UserControl
                     {
                         Browser.CoreWebView2.PostWebMessageAsJson(blockJson);
                         Browser.CoreWebView2.PostWebMessageAsJson(
-                            JsonSerializer.Serialize(new { type = "stream-done" }));
+                            JsonSerializer.Serialize(new { type = "stream-done", turnSeq = request.TurnSeq }));
                     });
                     return;
                 }
@@ -1789,6 +1860,7 @@ public partial class AgentToolWindowControl : UserControl
             // Explicit CLI path (D7) — attached to every outbound request; a
             // change respawns claude via the session key on the agent side.
             _agentClient.CliPath = string.IsNullOrWhiteSpace(request.CliPath) ? null : request.CliPath.Trim();
+            _agentClient.RemoteControl = request.RemoteControl == true;
 
             // User-configurable claude settings (V7). Booleans default to true
             // when the webview omits them (older payloads).
@@ -1801,7 +1873,8 @@ public partial class AgentToolWindowControl : UserControl
                 PermissionAsk = request.PermissionAsk,
                 PermissionDeny = request.PermissionDeny,
                 // Omitted by older payloads → 0 → wait for the answer.
-                PermissionTimeoutMinutes = request.PermissionTimeoutMinutes ?? 0
+                PermissionTimeoutMinutes = request.PermissionTimeoutMinutes ?? 0,
+                PerfMetrics = request.PerfMetrics ?? false
             };
 
             // IDE selection context (V11): when the user has text highlighted in
@@ -1812,8 +1885,25 @@ public partial class AgentToolWindowControl : UserControl
 
             var dispatcher = System.Windows.Application.Current.Dispatcher;
 
+            // Every streamed message hops onto VS's UI thread with a synchronous
+            // Invoke — the cost this migration removes. With ⚙ Performance
+            // metrics on, time each hop (queue wait + post) for the vs-turn record.
+            // Interlocked: the JSONL watcher calls in from its own thread.
+            var perfOn = request.PerfMetrics == true;
+            long invokeTicks = 0, invokeMaxTicks = 0, invokeCount = 0;
+            void UiPost(Action post)
+            {
+                if (!perfOn) { dispatcher.Invoke(post); return; }
+                var start = Stopwatch.GetTimestamp();
+                dispatcher.Invoke(post);
+                var elapsed = Stopwatch.GetTimestamp() - start;
+                System.Threading.Interlocked.Increment(ref invokeCount);
+                System.Threading.Interlocked.Add(ref invokeTicks, elapsed);
+                if (elapsed > invokeMaxTicks) invokeMaxTicks = elapsed; // ponytail: racy max, fine for a metric
+            }
+
             await _agentClient.AskStreamingAsync(request.Text + ideSelection, request.Model, request.Effort, request.PermissionMode,
-                chunk => dispatcher.Invoke(() =>
+                chunk => UiPost(() =>
                 {
                     const string notFound = "CLAUDE_NOT_FOUND::";
                     const string budgetExceeded = "BUDGET_EXCEEDED::";
@@ -1845,33 +1935,33 @@ public partial class AgentToolWindowControl : UserControl
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
                 }),
-                timing => dispatcher.Invoke(() =>
+                timing => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "timing", text = timing }))),
-                tokens => dispatcher.Invoke(() =>
+                tokens => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "tokens", text = tokens }))),
                 workingDirectory: workingDir,
                 autoResume: request.AutoResume,
-                onSession: sid => dispatcher.Invoke(() =>
+                onSession: sid => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "session-info", sessionId = sid, resumed = _agentClient.LastTurnResumed }))),
-                onTool: (kind, name, input, text, id) => dispatcher.Invoke(() =>
+                onTool: (kind, name, input, text, id) => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = kind, name, input, text, id }))),
-                onThinking: status => dispatcher.Invoke(() =>
+                onThinking: status => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "thinking-status", status }))),
-                onPermissionRequest: (tool, input, id, cwd) => dispatcher.Invoke(() =>
+                onPermissionRequest: (tool, input, id, cwd) => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),
-                onPermissionResolved: (id, reason) => dispatcher.Invoke(() =>
+                onPermissionResolved: (id, reason) => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "permission_resolved", id, reason }))),
                 onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId),
                 maxBudgetUsd: request.MaxBudgetUsd,
                 fallbackModel: string.IsNullOrWhiteSpace(request.FallbackModel) ? null : request.FallbackModel.Trim(),
-                onSubagentEvent: sc => dispatcher.Invoke(() =>
+                onSubagentEvent: sc => UiPost(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new
                         {
@@ -1887,16 +1977,35 @@ public partial class AgentToolWindowControl : UserControl
 
             VsStatusBar.Clear();
 
-            dispatcher.Invoke(() =>
+            // completed: only this path marks a turn that ran to its end — the page
+            // then sends the next queued message (gate/cancel stream-dones don't).
+            // A cancelled turn's stream-done already went out from the "cancel"
+            // handler; posting it again here would end whatever turn the user
+            // started (or dequeued) since.
+            var turnCompleted = !_agentClient.LastTurnCancelled;
+            UiPost(() =>
             {
-                Browser.CoreWebView2.PostWebMessageAsJson(
-                    JsonSerializer.Serialize(new { type = "stream-done" }));
+                if (turnCompleted)
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "stream-done", completed = true, turnSeq = request.TurnSeq }));
                 // Refresh Usage now — at this point claude.exe has flushed the
                 // assistant turn to JSONL, so the gated count (assistantTurns > 0)
                 // picks up the new session. Doing this on `session` (init) fires
                 // too early, before any turn has been written.
                 Usage.UsageToolWindowControl.RefreshIfOpen();
             });
+
+            if (perfOn)
+            {
+                double Ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+                var vsMetrics = new Dictionary<string, double>
+                {
+                    ["uiInvokes"] = invokeCount,
+                    ["uiInvokeMs"] = Ms(invokeTicks),
+                    ["uiInvokeMaxMs"] = Ms(invokeMaxTicks)
+                };
+                _ = Task.Run(() => AppendPerfRecord("vs-turn", vsMetrics));
+            }
 
             // Session title (V18): after the first completed turn of a session
             // with no stored title, ask claude for a short generated one
@@ -1960,15 +2069,15 @@ public partial class AgentToolWindowControl : UserControl
 
         if (string.IsNullOrEmpty(content))
         {
-            VsStatusBar.SetText("Nothing to export — chat is empty.");
+            VsStatusBar.SetText(Localization.Strings.Get("export.empty"));
             return;
         }
 
         var ts = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Export chat to Markdown",
-            Filter = "Markdown (*.md)|*.md|All files (*.*)|*.*",
+            Title = Localization.Strings.Get("export.title"),
+            Filter = Localization.Strings.Get("export.filter"),
             FileName = $"claude-chat-{ts}.md",
             DefaultExt = ".md",
             AddExtension = true
@@ -1980,11 +2089,11 @@ public partial class AgentToolWindowControl : UserControl
         try
         {
             File.WriteAllText(dialog.FileName, content);
-            VsStatusBar.SetText($"Chat exported to {dialog.FileName}");
+            VsStatusBar.SetText(Localization.Strings.Format("export.done", dialog.FileName));
         }
         catch (Exception ex)
         {
-            VsStatusBar.SetText($"Export failed: {ex.Message}");
+            VsStatusBar.SetText(Localization.Strings.Format("export.failed", ex.Message));
         }
     }
 
@@ -1994,8 +2103,8 @@ public partial class AgentToolWindowControl : UserControl
 
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Select file",
-            Filter = "All files (*.*)|*.*|Text files|*.txt;*.cs;*.js;*.ts;*.html;*.css;*.json;*.xml;*.md;*.py;*.cpp;*.h"
+            Title = Localization.Strings.Get("attach.title"),
+            Filter = Localization.Strings.Get("attach.filter")
         };
 
         if (dialog.ShowDialog() != true)
@@ -2251,7 +2360,7 @@ public partial class AgentToolWindowControl : UserControl
             {
                 OutputLog.Warn("apply-to-editor: no active document");
                 Browser.CoreWebView2.PostWebMessageAsJson(
-                    JsonSerializer.Serialize(new { type = "toast", text = "No active editor — open a file first." }));
+                    JsonSerializer.Serialize(new { type = "toast", text = Localization.Strings.Get("toast.noEditor") }));
                 return;
             }
 
@@ -2449,84 +2558,6 @@ public partial class AgentToolWindowControl : UserControl
         try { dte?.ItemOperations.OpenFile(path); } catch (Exception ex) { OutputLog.Warn($"view-session open failed: {ex.Message}"); }
     }
 
-    // Discovers custom slash commands (V9): .claude/commands/**/*.md in the
-    // project (working dir) and user (CLAUDE_CONFIG_DIR-aware) scopes. The CLI
-    // expands these when the message text is "/name", so the ⌘ menu only needs
-    // the names; subfolders namespace with ':' matching the CLI.
-    private async Task HandleGetSlashCommandsAsync(string? projectDir)
-    {
-        var result = await Task.Run(() =>
-        {
-            List<object> Scan(string? dir)
-            {
-                var items = new List<(string name, string description)>();
-                try
-                {
-                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return new List<object>();
-                    foreach (var file in Directory.EnumerateFiles(dir, "*.md", SearchOption.AllDirectories))
-                    {
-                        var rel = file.Substring(dir!.Length).TrimStart('\\', '/');
-                        var name = rel.Substring(0, rel.Length - 3).Replace('\\', ':').Replace('/', ':');
-                        items.Add((name, ReadFrontmatterDescription(file)));
-                    }
-                }
-                catch { /* unreadable dir — treat as empty */ }
-                return items.OrderBy(i => i.name, StringComparer.OrdinalIgnoreCase)
-                            .Select(i => (object)new { i.name, i.description })
-                            .ToList();
-            }
-
-            // Skills live one folder per skill (<dir>/<name>/SKILL.md), unlike
-            // commands (one .md per command). Name = folder, description from
-            // the SKILL.md frontmatter. The CLI expands "/<name>" for skills
-            // the same way it does for commands.
-            List<object> ScanSkills(string? dir)
-            {
-                var items = new List<(string name, string description)>();
-                try
-                {
-                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return new List<object>();
-                    foreach (var sub in Directory.EnumerateDirectories(dir))
-                    {
-                        var skillMd = System.IO.Path.Combine(sub, "SKILL.md");
-                        if (!File.Exists(skillMd)) continue;
-                        items.Add((System.IO.Path.GetFileName(sub), ReadFrontmatterDescription(skillMd)));
-                    }
-                }
-                catch { /* unreadable dir — treat as empty */ }
-                return items.OrderBy(i => i.name, StringComparer.OrdinalIgnoreCase)
-                            .Select(i => (object)new { i.name, i.description })
-                            .ToList();
-            }
-
-            var projectCmds = string.IsNullOrEmpty(projectDir)
-                ? new List<object>()
-                : Scan(System.IO.Path.Combine(projectDir, ".claude", "commands"));
-            var projectSkills = string.IsNullOrEmpty(projectDir)
-                ? new List<object>()
-                : ScanSkills(System.IO.Path.Combine(projectDir, ".claude", "skills"));
-            return new
-            {
-                project = projectCmds,
-                user = Scan(ClaudePaths.UserCommandsDir),
-                projectSkills,
-                userSkills = ScanSkills(ClaudePaths.UserSkillsDir)
-            };
-        });
-
-        var dispatcher = System.Windows.Application.Current.Dispatcher;
-        dispatcher.Invoke(() =>
-            Browser.CoreWebView2.PostWebMessageAsJson(
-                JsonSerializer.Serialize(new
-                {
-                    type = "slash-commands",
-                    project = result.project,
-                    user = result.user,
-                    projectSkills = result.projectSkills,
-                    userSkills = result.userSkills
-                })));
-    }
-
     // Folders never worth offering in the @ file picker (build output, VCS
     // metadata, package caches). Same list the dliedke extension settled on.
     private static readonly HashSet<string> WorkspaceIgnoredDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -2603,27 +2634,6 @@ public partial class AgentToolWindowControl : UserControl
         dispatcher.Invoke(() =>
             Browser.CoreWebView2.PostWebMessageAsJson(
                 JsonSerializer.Serialize(new { type = "workspace-files", files, root })));
-    }
-
-    // Pulls `description:` out of a command file's YAML frontmatter, if any.
-    private static string ReadFrontmatterDescription(string file)
-    {
-        try
-        {
-            using var sr = new StreamReader(file);
-            var first = sr.ReadLine();
-            if (first == null || first.Trim() != "---") return "";
-            for (int i = 0; i < 30; i++)
-            {
-                var line = sr.ReadLine();
-                if (line == null || line.Trim() == "---") break;
-                var t = line.TrimStart();
-                if (t.StartsWith("description:", StringComparison.OrdinalIgnoreCase))
-                    return t.Substring("description:".Length).Trim().Trim('"', '\'');
-            }
-        }
-        catch { }
-        return "";
     }
 
     // Forwards a context-usage probe to the agent (control_request
@@ -3596,7 +3606,7 @@ public partial class AgentToolWindowControl : UserControl
         }
 
         var currentSessionId = _agentClient.CurrentSessionId;
-        if (string.IsNullOrEmpty(currentSessionId)) { PostRewindError("No active session."); return; }
+        if (string.IsNullOrEmpty(currentSessionId)) { PostRewindError(Localization.Strings.Get("rewind.noSession")); return; }
 
         // Rewind runs through the live CLI on ITS session. When the transcript
         // on screen is a History replay of another session, the ordinals below
@@ -3605,7 +3615,7 @@ public partial class AgentToolWindowControl : UserControl
         if (!string.IsNullOrEmpty(uiSessionId) &&
             !string.Equals(uiSessionId, currentSessionId, StringComparison.OrdinalIgnoreCase))
         {
-            PostRewindError("This session isn't active yet — send a message first, then rewind.");
+            PostRewindError(Localization.Strings.Get("rewind.notActive"));
             return;
         }
 
@@ -3613,7 +3623,7 @@ public partial class AgentToolWindowControl : UserControl
         var sourceFile = Directory.Exists(claudeDir)
             ? Directory.GetFiles(claudeDir, $"{currentSessionId}.jsonl", SearchOption.AllDirectories).FirstOrDefault()
             : null;
-        if (sourceFile == null) { PostRewindError("Session transcript not found."); return; }
+        if (sourceFile == null) { PostRewindError(Localization.Strings.Get("rewind.noTranscript")); return; }
 
         System.Collections.Generic.List<string> lines;
         try
@@ -3628,7 +3638,7 @@ public partial class AgentToolWindowControl : UserControl
         catch (Exception ex)
         {
             OutputLog.Error($"rewind walk failed: {ex.Message}");
-            PostRewindError("Could not read transcript.");
+            PostRewindError(Localization.Strings.Get("rewind.readFailed"));
             return;
         }
 
@@ -3639,14 +3649,14 @@ public partial class AgentToolWindowControl : UserControl
         if (uuid == null)
         {
             OutputLog.Warn($"rewind: user ordinal {msgIndex} out of range (found {totalUserMessages} user messages)");
-            PostRewindError("Could not locate that message in the transcript.");
+            PostRewindError(Localization.Strings.Get("rewind.notFound"));
             return;
         }
 
         var (resultJson, error) = await _agentClient.RewindAsync(uuid!, dryRun);
         if (error != null || resultJson == null)
         {
-            PostRewindError(error ?? "Rewind failed.");
+            PostRewindError(error ?? Localization.Strings.Get("rewind.failed"));
             return;
         }
 
@@ -3803,7 +3813,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (string.IsNullOrEmpty(workDir) || !Directory.Exists(workDir))
             {
-                diff = "No solution open.";
+                diff = Localization.Strings.Get("diff.noSolution");
             }
             else if (!Directory.Exists(Path.Combine(workDir, ".git")) &&
                      !await IsInsideGitWorktreeAsync(workDir))
@@ -3812,8 +3822,8 @@ public partial class AgentToolWindowControl : UserControl
                 // VS's own Git panel shows "git not in use" in this case. We just
                 // surface a friendly message instead of running git commands that
                 // all fail silently.
-                stat = "Not a git repository.";
-                diff = "This project is not under git version control.\n\nInitialize a repository in VS to enable diffs.";
+                stat = Localization.Strings.Get("diff.notRepo");
+                diff = Localization.Strings.Get("diff.notRepoBody");
             }
             else
             {
@@ -3860,21 +3870,21 @@ public partial class AgentToolWindowControl : UserControl
 
                         if (statSb.Length > 0)
                         {
-                            statSb.AppendLine($" {paths.Length} files (no initial commit yet), {totalLines} insertions(+)");
+                            statSb.AppendLine(Localization.Strings.Format("diff.noCommitStat", paths.Length, totalLines));
                             stat = statSb.ToString();
                             diff = diffSb.ToString();
                         }
                         else
                         {
-                            stat = "Repository initialized but empty.";
-                            diff = "No tracked or untracked files to show.";
+                            stat = Localization.Strings.Get("diff.emptyRepo");
+                            diff = Localization.Strings.Get("diff.noFiles");
                         }
                     }
                     else
                     {
                         stat = await RunGitAsync(workDir, "status --short");
                         if (string.IsNullOrWhiteSpace(stat))
-                            diff = "No changes since the last commit.";
+                            diff = Localization.Strings.Get("diff.noChanges");
                     }
                 }
             }
@@ -3882,7 +3892,7 @@ public partial class AgentToolWindowControl : UserControl
         catch (Exception ex)
         {
             OutputLog.Warn($"HandleGetDiffAsync failed: {ex.Message}");
-            diff = $"Error computing diff: {ex.Message}";
+            diff = Localization.Strings.Format("diff.error", ex.Message);
         }
         finally
         {
@@ -4070,7 +4080,7 @@ public partial class AgentToolWindowControl : UserControl
         public string? Effort { get; set; }
 
         [JsonPropertyName("permissionMode")]
-        public string PermissionMode { get; set; } = "ask";
+        public ClaudeStudioShared.PermissionMode PermissionMode { get; set; } = ClaudeStudioShared.PermissionMode.Ask;
 
         [JsonPropertyName("sessionId")]
         public string? SessionId { get; set; }
@@ -4139,6 +4149,24 @@ public partial class AgentToolWindowControl : UserControl
         [JsonPropertyName("accent")]
         public string? Accent { get; set; }
 
+        [JsonPropertyName("uiLanguage")]
+        public string? UiLanguage { get; set; }
+
+        // The page's turn number on chat/cancel, echoed on stream-done so a late
+        // stream-done of an older turn can't end the one running now.
+        [JsonPropertyName("turnSeq")]
+        public int? TurnSeq { get; set; }
+
+        // Plugins panel (plugin-action): what to run via `claude plugin …`.
+        [JsonPropertyName("pluginAction")]
+        public ClaudeStudioShared.PluginAction? PluginAction { get; set; }
+
+        [JsonPropertyName("pluginTarget")]
+        public string? PluginTarget { get; set; }
+
+        [JsonPropertyName("pluginScope")]
+        public ClaudeStudioShared.PluginScope? PluginScope { get; set; }
+
         [JsonPropertyName("content")]
         public string? Content { get; set; }
 
@@ -4171,6 +4199,20 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("autoCompact")]
         public bool? AutoCompact { get; set; }
+
+        // ⚙ Performance metrics toggle (chat), and the per-turn numbers (perf-ui).
+        // Remote Control: composer switch on "chat"; the new state on "remote-control".
+        [JsonPropertyName("remoteControl")]
+        public bool? RemoteControl { get; set; }
+
+        [JsonPropertyName("enabled")]
+        public bool? Enabled { get; set; }
+
+        [JsonPropertyName("perfMetrics")]
+        public bool? PerfMetrics { get; set; }
+
+        [JsonPropertyName("metrics")]
+        public Dictionary<string, double>? Metrics { get; set; }
 
         [JsonPropertyName("code")]
         public string? Code { get; set; }

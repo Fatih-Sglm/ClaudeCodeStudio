@@ -32,6 +32,23 @@ console.log("Claude Code Studio loaded");
     }
 })();
 
+// ── ⋯ menu (top bar) ─────────────────────────────────────────
+// Everything but history and settings lives here. Items stop the click so
+// a menu they open (⌘ commands) isn't shut by its own outside-click handler.
+function toggleMoreMenu() {
+    document.getElementById("more-menu").classList.toggle("open");
+}
+function moreAction(e, action) {
+    e.stopPropagation();
+    document.getElementById("more-menu").classList.remove("open");
+    action();
+}
+document.addEventListener("click", e => {
+    const wrap = document.getElementById("more-wrap");
+    if (wrap && !wrap.contains(e.target))
+        document.getElementById("more-menu")?.classList.remove("open");
+});
+
 // ── Layout toggle ────────────────────────────────────────────
 function toggleLayout() {
     const app = document.querySelector(".app");
@@ -52,6 +69,7 @@ function toggleLayout() {
 })();
 
 // ── Composer splitter ────────────────────────────────────────
+// Sets the textarea's MIN height; CSS field-sizing grows it with the text.
 (function initSplitter() {
     const splitter = document.getElementById("splitter");
     if (!splitter) return;
@@ -62,7 +80,7 @@ function toggleLayout() {
 
     const saved = parseInt(localStorage.getItem("composerTextareaHeight") || "0", 10);
     if (saved >= MIN_HEIGHT && saved <= MAX_HEIGHT && ta) {
-        ta.style.height = saved + "px";
+        ta.style.minHeight = saved + "px";
     }
 
     let startY = 0;
@@ -71,7 +89,7 @@ function toggleLayout() {
     function onMove(e) {
         const delta = startY - e.clientY;
         const next = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + delta));
-        ta.style.height = next + "px";
+        ta.style.minHeight = next + "px";
     }
 
     function onUp() {
@@ -79,7 +97,7 @@ function toggleLayout() {
         document.removeEventListener("mouseup", onUp);
         splitter.classList.remove("dragging");
         document.body.classList.remove("splitter-dragging");
-        const h = parseInt(ta.style.height, 10);
+        const h = parseInt(ta.style.minHeight, 10);
         if (h) localStorage.setItem("composerTextareaHeight", String(h));
     }
 
@@ -202,7 +220,7 @@ function renderTrustedWorkspacesList(paths) {
     const container = document.getElementById("trusted-workspaces-list");
     if (!container) return;
     if (!paths || paths.length === 0) {
-        container.innerHTML = '<div class="trusted-workspaces-empty">No trusted workspaces yet.</div>';
+        container.innerHTML = `<div class="trusted-workspaces-empty">${t("trusted.empty")}</div>`;
         return;
     }
     container.innerHTML = "";
@@ -218,7 +236,7 @@ function renderTrustedWorkspacesList(paths) {
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "trusted-workspace-remove";
-        remove.title = "Remove from trusted list";
+        remove.title = t("trusted.remove");
         remove.textContent = "✕";
         remove.onclick = () => removeTrustedWorkspace(path);
 
@@ -268,7 +286,7 @@ function updateHistoryHint() {
         el.textContent = "";
     } else {
         // Show 1-based "current/total" — older prompts have lower display index
-        el.textContent = `↑ history ${historyIndex + 1}/${promptHistory.length}`;
+        el.textContent = t("history.hint", { i: historyIndex + 1, n: promptHistory.length });
         el.hidden = false;
     }
 }
@@ -284,7 +302,7 @@ function toggleHistory() {
     if (isOpen) {
         document.getElementById("history-search").value = "";
         document.getElementById("history-list").innerHTML =
-            '<div class="cmd-item" style="color:#555;font-family:inherit">Loading…</div>';
+            `<div class="cmd-item" style="color:#555;font-family:inherit">${t("common.loading")}</div>`;
         requestHistory();
     }
 }
@@ -296,7 +314,7 @@ function requestHistory() {
 
 function onShowAllToggle() {
     document.getElementById("history-list").innerHTML =
-        '<div class="cmd-item" style="color:#555;font-family:inherit">Loading…</div>';
+        `<div class="cmd-item" style="color:#555;font-family:inherit">${t("common.loading")}</div>`;
     requestHistory();
 }
 
@@ -329,7 +347,7 @@ function renderCustomCommands() {
     customCommands.forEach((cmd, i) => {
         const row = document.createElement("div");
         row.className = "cmd-item cmd-custom-item";
-        row.innerHTML = `<span onclick="runCommand('${escapeAttr(cmd.command)}')">${escapeHtml(cmd.name || cmd.command)}</span><button class="cmd-custom-remove" onclick="removeCommand(${i})" title="Remove">×</button>`;
+        row.innerHTML = `<span onclick="runCommand('${escapeAttr(cmd.command)}')">${escapeHtml(cmd.name || cmd.command)}</span><button class="cmd-custom-remove" onclick="removeCommand(${i})" title="${t("common.remove")}">×</button>`;
         list.appendChild(row);
     });
 }
@@ -355,8 +373,10 @@ function toggleCmdMenu() {
 // Discovered custom commands (V9) also feed the composer's "/" autocomplete —
 // refreshed whenever the ⌘ menu opens or the workspace changes.
 let discoveredSlashCommands = [];
+// "/name" → { description, argumentHint } for the "/" list (CLI list when available).
+let slashCommandInfo = new Map();
 
-function renderSlashCommands(project, user, projectSkills, userSkills) {
+function renderSlashCommands(project, user, projectSkills, userSkills, cli) {
     // Skills invoke like commands (the CLI expands "/<name>" for both), so
     // they join the "/" autocomplete pool; a project and a user skill with the
     // same name dedupe to one entry (most-specific wins, like the CLI).
@@ -365,7 +385,11 @@ function renderSlashCommands(project, user, projectSkills, userSkills) {
         if (!skillNames.has(s.name)) skillNames.set(s.name, s);
     });
     const skills = [...skillNames.values()];
-    discoveredSlashCommands = [...(project || []), ...(user || []), ...skills].map(c => "/" + c.name);
+    // The CLI's own list (built-ins, plugins, skills) when the host has it;
+    // otherwise what the folder scan found.
+    const source = cli && cli.length ? cli : [...(project || []), ...(user || []), ...skills];
+    discoveredSlashCommands = source.map(c => "/" + c.name);
+    slashCommandInfo = new Map(source.map(c => ["/" + c.name, c]));
     const fill = (wrapId, listId, cmds) => {
         const wrap = document.getElementById(wrapId);
         const list = document.getElementById(listId);
@@ -392,15 +416,15 @@ function requestContextUsage() {
 
     const card = document.createElement("div");
     card.className = "question-card ctx-usage-card";
-    card.innerHTML = `<div class="question-text">◔ Context usage` +
-        `<button type="button" class="pinned-close" title="Close">✕</button></div>` +
-        `<div class="ctx-usage-body">Loading…</div>`;
+    card.innerHTML = `<div class="question-text">◔ ${t("cmd.contextUsage")}` +
+        `<button type="button" class="pinned-close" title="${t("common.close")}">✕</button></div>` +
+        `<div class="ctx-usage-body">${t("common.loading")}</div>`;
     card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
     pinCard(card, messages, "manual");
     _pendingCtxUsageCard = card;
 
     try { window.chrome.webview.postMessage({ type: "get-context-usage" }); }
-    catch (e) { card.querySelector(".ctx-usage-body").textContent = "Failed to reach the extension."; }
+    catch (e) { card.querySelector(".ctx-usage-body").textContent = t("common.failedReach"); }
 }
 
 // ── Side question (V19) ───────────────────────────────────────
@@ -414,11 +438,11 @@ function openSideQuestionCard() {
 
     const card = document.createElement("div");
     card.className = "question-card side-question-card";
-    card.innerHTML = `<div class="question-text">💬 Side question <span class="side-question-note">answered with the session's context — not added to the transcript</span><button type="button" class="pinned-close" title="Close">✕</button></div>
+    card.innerHTML = `<div class="question-text">💬 ${t("cmd.sideQuestion")} <span class="side-question-note">${t("sideq.note")}</span><button type="button" class="pinned-close" title="${t("common.close")}">✕</button></div>
         <div class="side-question-ask">
-            <input type="text" placeholder="e.g. what did that error mean?"
+            <input type="text" placeholder="${t("sideq.placeholder")}"
                 onkeydown="if(event.key==='Enter'){event.preventDefault();sendSideQuestion(this.closest('.side-question-card'));}" />
-            <button type="button" onclick="sendSideQuestion(this.closest('.side-question-card'))">Ask</button>
+            <button type="button" onclick="sendSideQuestion(this.closest('.side-question-card'))">${t("sideq.ask")}</button>
         </div>
         <div class="side-question-answer" style="display:none"></div>`;
     card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
@@ -435,11 +459,11 @@ function sendSideQuestion(card) {
     card.querySelector(".side-question-ask button").disabled = true;
     const answerEl = card.querySelector(".side-question-answer");
     answerEl.style.display = "";
-    answerEl.textContent = "Thinking…";
+    answerEl.textContent = t("common.thinking");
     _pendingSideQuestionCard = card;
 
     try { window.chrome.webview.postMessage({ type: "side-question", text: q }); }
-    catch (e) { answerEl.textContent = "Failed to reach the extension."; }
+    catch (e) { answerEl.textContent = t("common.failedReach"); }
     autoScroll();
 }
 
@@ -451,11 +475,11 @@ function renderSideQuestionAnswer(answer, error) {
 
     if (error) {
         const friendly = error.includes("no active session") || error.includes("agent not running")
-            ? "No active session yet — send a message first, then ask again."
-            : `Failed: ${error}`;
+            ? t("sideq.noSession")
+            : t("common.failed", { error });
         answerEl.textContent = friendly;
     } else if (!answer) {
-        answerEl.textContent = "Claude declined to answer this one.";
+        answerEl.textContent = t("sideq.declined");
     } else {
         answerEl.innerHTML = renderMarkdown(answer);
     }
@@ -476,22 +500,22 @@ function requestMcpStatus() {
     if (!card) {
         card = document.createElement("div");
         card.className = "question-card mcp-status-card";
-        card.innerHTML = `<div class="question-text">🔌 MCP status` +
-            `<button type="button" class="pinned-close" title="Close">✕</button></div>` +
-            `<div class="mcp-status-body">Loading…</div>`;
+        card.innerHTML = `<div class="question-text">🔌 ${t("cmd.mcpStatus")}` +
+            `<button type="button" class="pinned-close" title="${t("common.close")}">✕</button></div>` +
+            `<div class="mcp-status-body">${t("common.loading")}</div>`;
         card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
         pinCard(card, messages, "manual");
     }
     _pendingMcpCard = card;
 
     try { window.chrome.webview.postMessage({ type: "get-mcp-status" }); }
-    catch (e) { card.querySelector(".mcp-status-body").textContent = "Failed to reach the extension."; }
+    catch (e) { card.querySelector(".mcp-status-body").textContent = t("common.failedReach"); }
 }
 
 function reconnectMcpServer(name) {
     if (_pendingMcpCard) {
         const row = _pendingMcpCard.querySelector(`.mcp-status-row[data-server="${CSS.escape(name)}"] .mcp-reconnect-btn`);
-        if (row) { row.disabled = true; row.textContent = "Reconnecting…"; }
+        if (row) { row.disabled = true; row.textContent = t("mcp.reconnecting"); }
     }
     try { window.chrome.webview.postMessage({ type: "mcp-reconnect", text: name }); } catch (e) {}
 }
@@ -503,17 +527,17 @@ function renderMcpStatusCard(serversJson, error) {
 
     if (error || !serversJson) {
         const friendly = (error || "").includes("no active session") || (error || "").includes("agent not running")
-            ? "No active session yet — send a message first, then check again."
-            : `Failed to load MCP status: ${error || "empty response"}`;
+            ? t("common.noSessionCheck")
+            : t("mcp.loadFailed", { error: error || t("common.emptyResponse") });
         body.textContent = friendly;
         return;
     }
 
     let servers;
     try { servers = JSON.parse(serversJson); }
-    catch (e) { body.textContent = "Failed to parse MCP status."; return; }
+    catch (e) { body.textContent = t("mcp.parseFailed"); return; }
     if (!Array.isArray(servers) || servers.length === 0) {
-        body.textContent = "No MCP servers in this session.";
+        body.textContent = t("mcp.none");
         return;
     }
 
@@ -525,7 +549,7 @@ function renderMcpStatusCard(serversJson, error) {
   <span class="mcp-status-dot ${ok ? "mcp-ok" : "mcp-bad"}"></span>
   <span class="mcp-status-name">${escapeHtml(name)}</span>
   <span class="mcp-status-state">${escapeHtml(status)}</span>
-  <button type="button" class="mcp-reconnect-btn" onclick="reconnectMcpServer('${escapeAttr(name)}')">Reconnect</button>
+  <button type="button" class="mcp-reconnect-btn" onclick="reconnectMcpServer('${escapeAttr(name)}')">${t("mcp.reconnect")}</button>
 </div>`;
     }).join("");
     autoScroll();
@@ -540,15 +564,15 @@ function requestDoctor() {
 
     const card = document.createElement("div");
     card.className = "question-card doctor-card";
-    card.innerHTML = `<div class="question-text">🩺 Doctor` +
-        `<button type="button" class="pinned-close" title="Close">✕</button></div>` +
-        `<div class="doctor-body">Running claude doctor…</div>`;
+    card.innerHTML = `<div class="question-text">🩺 ${t("cmd.doctor")}` +
+        `<button type="button" class="pinned-close" title="${t("common.close")}">✕</button></div>` +
+        `<div class="doctor-body">${t("doctor.running")}</div>`;
     card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
     pinCard(card, messages, "manual");
     _pendingDoctorCard = card;
 
     try { window.chrome.webview.postMessage({ type: "run-doctor" }); }
-    catch (e) { card.querySelector(".doctor-body").textContent = "Failed to reach the extension."; }
+    catch (e) { card.querySelector(".doctor-body").textContent = t("common.failedReach"); }
 }
 
 function renderDoctorCard(output, error) {
@@ -562,7 +586,7 @@ function renderDoctorCard(output, error) {
         return;
     }
     body.innerHTML = `<pre class="doctor-output"></pre>`;
-    body.querySelector(".doctor-output").textContent = output || "(no output)";
+    body.querySelector(".doctor-output").textContent = output || t("doctor.noOutput");
     autoScroll();
 }
 
@@ -582,22 +606,22 @@ function renderContextUsageCard(usageJson, error) {
 
     if (error || !usageJson) {
         const friendly = (error || "").includes("no active session") || (error || "").includes("agent not running")
-            ? "No active session yet — send a message first, then check again."
-            : `Failed to load context usage: ${error || "empty response"}`;
+            ? t("common.noSessionCheck")
+            : t("ctx.loadFailed", { error: error || t("common.emptyResponse") });
         body.textContent = friendly;
         return;
     }
 
     let u;
     try { u = JSON.parse(usageJson); }
-    catch (e) { body.textContent = "Failed to parse context usage."; return; }
+    catch (e) { body.textContent = t("ctx.parseFailed"); return; }
 
     const cats = (u.categories || []).filter(c => (c.tokens || 0) > 0 && !c.isDeferred);
     const segs = cats.filter(c => c.name !== "Free space");
     const max = u.rawMaxTokens || 1;
 
     let html = `<div class="ctx-usage-header"><span>${escapeHtml(u.model || "")}</span>` +
-        `<span>${fmtTokens(u.totalTokens)} / ${fmtTokens(u.rawMaxTokens)} tokens (${u.percentage ?? "?"}%)</span></div>`;
+        `<span>${t("ctx.tokens", { used: fmtTokens(u.totalTokens), max: fmtTokens(u.rawMaxTokens), pct: u.percentage ?? "?" })}</span></div>`;
 
     html += `<div class="ctx-usage-track">` + segs.map(c =>
         `<div class="ctx-usage-seg" style="background:${_ctxPalette[cats.indexOf(c) % _ctxPalette.length]};width:${(c.tokens / max * 100).toFixed(2)}%" title="${escapeAttrValue(c.name)}: ${fmtTokens(c.tokens)}"></div>`
@@ -618,9 +642,9 @@ function renderContextUsageCard(usageJson, error) {
             `<span class="ctx-cat-tokens">${fmtTokens(x.tokens)}</span><span class="ctx-cat-pct"></span></div>`).join("");
 
     if ((u.memoryFiles || []).length > 0)
-        html += `<div class="ctx-usage-subheader">Memory files</div><div class="ctx-cat-list">${top(u.memoryFiles, x => x.path || "")}</div>`;
+        html += `<div class="ctx-usage-subheader">${t("ctx.memoryFiles")}</div><div class="ctx-cat-list">${top(u.memoryFiles, x => x.path || "")}</div>`;
     if ((u.agents || []).length > 0)
-        html += `<div class="ctx-usage-subheader">Custom agents</div><div class="ctx-cat-list">${top(u.agents, x => x.agentType || "")}</div>`;
+        html += `<div class="ctx-usage-subheader">${t("ctx.customAgents")}</div><div class="ctx-cat-list">${top(u.agents, x => x.agentType || "")}</div>`;
 
     body.innerHTML = html;
     autoScroll();
@@ -674,7 +698,7 @@ function runCommand(cmd) {
         openUsageModal();
         isUsageCapture = true;
         usageBuffer = "";
-        document.getElementById("usage-raw").innerHTML = '<span class="usage-loading">Running /usage…</span>';
+        document.getElementById("usage-raw").innerHTML = `<span class="usage-loading">${t("usage.running")}</span>`;
         textarea.value = cmd;
         sendMessage();
         return;
@@ -696,7 +720,7 @@ function updateUsageSessionValues() {
     const fmt = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
     const el = document.getElementById("usage-session-values");
     if (sessionIn === 0 && sessionOut === 0) { el.textContent = "—"; return; }
-    el.textContent = `↑ ${fmt(sessionIn)} in · ↓ ${fmt(sessionOut)} out`;
+    el.textContent = t("usage.session", { in: fmt(sessionIn), out: fmt(sessionOut) });
 }
 
 function openAddCommand() {
@@ -739,10 +763,37 @@ const modelSelect = document.querySelector(".model-select");
 // Restore the last chosen model (survives VS restarts). A stored id that no
 // longer exists in the list (renamed/removed model) is ignored — setting an
 // unknown value would leave the select on the default anyway.
+const ModelStorageKey = Object.freeze({ LastUsed: "chatModel", Default: "defaultModel" });
+function isKnownModel(id) { return !!id && [...modelSelect.options].some(o => o.value === id); }
+// What a new chat starts with: Settings → Default model, or the last pick
+// when that's "Last used" (empty).
+function startupModel() {
+    try {
+        const fixed = localStorage.getItem(ModelStorageKey.Default);
+        if (isKnownModel(fixed)) return fixed;
+        const last = localStorage.getItem(ModelStorageKey.LastUsed);
+        return isKnownModel(last) ? last : null;
+    } catch (_) { return null; }
+}
+function setDefaultModel(value) {
+    try {
+        if (value && isKnownModel(value)) localStorage.setItem(ModelStorageKey.Default, value);
+        else localStorage.removeItem(ModelStorageKey.Default);
+    } catch (_) { }
+    // An empty chat switches now; a conversation in progress keeps its model.
+    const id = startupModel();
+    if (id && id !== modelSelect.value && !isStreaming && userMsgCounter === 0) {
+        modelSelect.value = id;
+        modelSelect.dispatchEvent(new Event("change"));
+    }
+}
 (function restoreModelSelection() {
-    const stored = localStorage.getItem("chatModel");
-    if (stored && [...modelSelect.options].some(o => o.value === stored))
-        modelSelect.value = stored;
+    const id = startupModel();
+    if (id) modelSelect.value = id;
+    const select = document.getElementById("default-model-select");
+    if (!select) return;
+    for (const o of modelSelect.options) select.appendChild(new Option(o.text, o.value));
+    try { select.value = isKnownModel(localStorage.getItem(ModelStorageKey.Default)) ? localStorage.getItem(ModelStorageKey.Default) : ""; } catch (_) { }
 })();
 // Tracks which model is currently in effect, so noteModelSwitch() can tell a
 // real change from a no-op and drop a divider in the transcript at the point
@@ -891,8 +942,8 @@ let _trustPendingPath = "";
 let _trustPendingParent = "";
 
 const TRUST_RISK_MESSAGES = {
-    "drive-root": "Trusting this folder grants Claude access to the entire drive — Windows, Program Files, every existing and future folder on it.",
-    "users-container": "Trusting this folder grants Claude access to every user profile on this machine.",
+    "drive-root": "trust.risk.driveRoot",
+    "users-container": "trust.risk.usersContainer",
 };
 
 function openTrustModal(path, parent, parentIsBlocked, riskWarning) {
@@ -920,8 +971,8 @@ function openTrustModal(path, parent, parentIsBlocked, riskWarning) {
         parentRow.hidden = false;
         parentPath.textContent = _trustPendingParent;
         const parentName = _trustPendingParent.split(/[\\/]+/).filter(Boolean).pop() || _trustPendingParent;
-        parentBtn.textContent = `Trust parent (${parentName})`;
-        parentBtn.title = `Trust ${_trustPendingParent}`;
+        parentBtn.textContent = t("trust.parentNamed", { name: parentName });
+        parentBtn.title = t("trust.trustPath", { path: _trustPendingParent });
         parentBtn.style.display = "";
     } else {
         parentRow.hidden = true;
@@ -934,7 +985,7 @@ function openTrustModal(path, parent, parentIsBlocked, riskWarning) {
     if (warningEl && warningText) {
         const msg = riskWarning ? TRUST_RISK_MESSAGES[riskWarning] : null;
         if (msg) {
-            warningText.textContent = msg;
+            warningText.textContent = t(msg);
             warningEl.hidden = false;
         } else {
             warningEl.hidden = true;
@@ -1046,9 +1097,9 @@ function renderCwd(vsPath) {
 
     if (!effective) {
         bar.classList.add("cwdbar-empty");
-        bar.title = "No workspace open";
+        bar.title = t("cwd.noWorkspaceOpen");
         pathEl.innerHTML = "";
-        pathEl.textContent = "No workspace";
+        pathEl.textContent = t("cwd.noWorkspace");
         return;
     }
 
@@ -1059,8 +1110,8 @@ function renderCwd(vsPath) {
     if (isOverride) bar.classList.add("cwdbar-override");
 
     let tooltip = effective;
-    if (isOverride) tooltip += `  (override — VS workspace: ${_cwdVsPath || "none"})`;
-    if (!_workspaceTrusted) tooltip += "  · not trusted";
+    if (isOverride) tooltip += t("cwd.overrideTip", { path: _cwdVsPath || t("common.none") });
+    if (!_workspaceTrusted) tooltip += " " + t("cwd.notTrusted");
     bar.title = tooltip;
 
     pathEl.innerHTML = "";
@@ -1068,13 +1119,13 @@ function renderCwd(vsPath) {
     if (isOverride) {
         const tag = document.createElement("span");
         tag.className = "cwdbar-override-tag";
-        tag.textContent = " (override)";
+        tag.textContent = t("cwd.overrideTag");
         pathEl.appendChild(tag);
     }
     if (!_workspaceTrusted) {
         const tag = document.createElement("span");
         tag.className = "cwdbar-untrusted-tag";
-        tag.textContent = " · not trusted";
+        tag.textContent = t("cwd.notTrusted");
         pathEl.appendChild(tag);
     }
 }
@@ -1117,13 +1168,13 @@ function renderPresence(status, waitingFor) {
             do { i = Math.floor(Math.random() * THINKING_WORDS.length); }
             while (i === _thinkingIdx && THINKING_WORDS.length > 1);
             _thinkingIdx = i;
-            el.textContent = "✳ " + THINKING_WORDS[i] + "…";
+            el.textContent = "✳ " + t("thinking." + THINKING_WORDS[i]) + "…";
         };
         tick(); // show a word immediately, don't wait for the first interval
         el.hidden = false;
         if (!_thinkingTimer) _thinkingTimer = setInterval(tick, 2500);
     } else if (status === "compacting") {
-        el.textContent = "🗜️ compacting context…";
+        el.textContent = t("presence.compacting");
         el.hidden = false;
     } else {
         el.textContent = "";
@@ -1169,8 +1220,8 @@ function renderAccountInfo() {
     el.classList.remove("account-info-loading");
 
     if (!_accountInfo || !_accountInfo.signedIn) {
-        el.textContent = "Not signed in";
-        el.title = "Click to sign in with Claude";
+        el.textContent = t("account.notSignedIn");
+        el.title = t("account.clickToSignIn");
         el.classList.add("account-info-muted");
         el.classList.add("account-info-clickable");
         el.onclick = startClaudeLogin;
@@ -1191,16 +1242,16 @@ function renderAccountInfo() {
 
     if (source === "account") {
         name = accountName || "—";
-        tooltip = accountName ? (email ? `${accountName} (${email})` : accountName) : "Account name unavailable";
+        tooltip = accountName ? (email ? `${accountName} (${email})` : accountName) : t("account.nameUnavailable");
     } else if (source === "organization") {
         name = org || "—";
-        tooltip = org || "Organization unavailable";
+        tooltip = org || t("account.orgUnavailable");
     } else if (source === "email") {
         name = email || "—";
-        tooltip = email || "Email unavailable";
+        tooltip = email || t("account.emailUnavailable");
     } else if (source === "custom") {
         name = customName || "—";
-        tooltip = customName || "Set a custom name in settings";
+        tooltip = customName || t("account.setCustomName");
     } else {
         // auto cascade: custom → account → organization → email → Anonymous
         if (customName) {
@@ -1216,7 +1267,7 @@ function renderAccountInfo() {
             name = email;
             tooltip = email;
         } else {
-            name = "Anonymous";
+            name = t("account.anonymous");
             tooltip = "";
         }
     }
@@ -1310,10 +1361,10 @@ function noteModelSwitch() {
     // fallback recovery notice could fire against the old selection.
     _lastReportedActiveModel = newId;
     if (_restoringSessionModel) return;
-    localStorage.setItem("chatModel", newId);
+    localStorage.setItem(ModelStorageKey.LastUsed, newId);
 
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || newId;
-    insertOrUpdateModelDivider(`🤖 Switched to ${label}`);
+    insertOrUpdateModelDivider(t("model.switched", { label }));
 }
 modelSelect.addEventListener("change", noteModelSwitch);
 
@@ -1352,17 +1403,17 @@ function cacheNoteText(lastTurnAt, contextTokens, cacheTtlMin) {
     if (!(idleMs > 0)) return null;
     const ttlMs = (cacheTtlMin || 60) * 60000;
     if (idleMs <= ttlMs) return null;
-    return `Idle for ${formatIdleDuration(idleMs)} · the next reply re-caches the full context (~${formatApproxTokens(contextTokens)})`;
+    return t("model.cacheNote", { idle: formatIdleDuration(idleMs), tokens: formatApproxTokens(contextTokens) });
 }
 
 function formatIdleDuration(ms) {
     const hours = ms / 3600000;
-    if (hours >= 1) return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)}h`;
-    return `${Math.max(1, Math.round(ms / 60000))}min`;
+    if (hours >= 1) return t("fmt.hours", { n: hours < 10 ? hours.toFixed(1) : Math.round(hours) });
+    return t("fmt.minutes", { n: Math.max(1, Math.round(ms / 60000)) });
 }
 
 function formatApproxTokens(n) {
-    return n > 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`;
+    return t("fmt.tokens", { n: n > 1000 ? `${(n / 1000).toFixed(1)}k` : n });
 }
 
 // #21 backlog item 16: both resume markers (model restored, cache likely
@@ -1375,7 +1426,7 @@ function formatApproxTokens(n) {
 function showResumeNotice(rawModelId, lastTurnAt, contextTokens, cacheTtlMin) {
     const modelLabel = restoreSessionModel(rawModelId);
     const cacheMsg = cacheNoteText(lastTurnAt, contextTokens, cacheTtlMin);
-    if (modelLabel) appendResumeDivider(`🤖 Resumed on ${modelLabel}`);
+    if (modelLabel) appendResumeDivider(t("model.resumedOn", { label: modelLabel }));
     if (cacheMsg) appendResumeDivider(`⏳ ${cacheMsg}`);
     autoScroll();
 }
@@ -1406,8 +1457,8 @@ function noteModelFallback(actualModelId) {
     const opt = [...modelSelect.options].find(o => o.value === actualModelId);
     const label = opt ? opt.text : actualModelId;
     insertOrUpdateModelDivider(actualModelId === requestedId
-        ? `🔀 Back to ${label}`
-        : `🔀 Fell back to ${label} (primary unavailable)`);
+        ? t("model.backTo", { label })
+        : t("model.fellBack", { label }));
 }
 
 // ── Model picker (titlebar) ──────────────────────────────────
@@ -1503,7 +1554,7 @@ const effortSelect = { get value() { return effortValues[+effortPopupSlider.valu
 
 function updateEffortButton(idx) {
     effortBtnIcon.textContent = effortIcons[idx];
-    effortBtnLabel.textContent = effortLabels[idx];
+    effortBtnLabel.textContent = t("effort." + effortLabels[idx]);
 }
 
 function toggleEffortPopup() {
@@ -1531,11 +1582,11 @@ const autoSaveValues = ["none", "active", "all"];
 (function () {
     const saved = localStorage.getItem("autoSaveLevel") ?? "1";
     autoSaveSlider.value = saved;
-    autoSaveLabel.textContent = autoSaveValues[+saved];
+    autoSaveLabel.textContent = t("autosave." + autoSaveValues[+saved]);
 })();
 autoSaveSlider.addEventListener("input", () => {
     const i = +autoSaveSlider.value;
-    autoSaveLabel.textContent = autoSaveValues[i];
+    autoSaveLabel.textContent = t("autosave." + autoSaveValues[i]);
     localStorage.setItem("autoSaveLevel", i);
 });
 
@@ -1547,8 +1598,42 @@ autoSaveSlider.addEventListener("input", () => {
 // slider), so the popup is a list of clickable items. The send code reads
 // `permissionSelect.value` — keep a shim so the existing call site doesn't
 // have to change.
-const PERMISSION_ICONS = { ask: "🔒", plan: "📋", dontAsk: "🔕", yolo: "⚡" };
-let _permissionValue = "ask";
+const StorageKey = Object.freeze({ RemoteControl: "remoteControl", DefaultPermissionMode: "defaultPermissionMode" });
+// Wire values the agent's PermissionMode enum reads (case-insensitive).
+const PermissionModeValue = Object.freeze({ Ask: "ask", AcceptEdits: "acceptEdits", Plan: "plan", Auto: "auto", Bypass: "bypassPermissions" });
+// What the panel starts in (Settings → Default mode). Bypass is not offered:
+// starting every session with no approvals must stay a deliberate, per-session pick.
+const DEFAULT_MODE_CHOICES = [PermissionModeValue.Ask, PermissionModeValue.AcceptEdits, PermissionModeValue.Plan, PermissionModeValue.Auto];
+function defaultPermissionMode() {
+    try {
+        const v = localStorage.getItem(StorageKey.DefaultPermissionMode);
+        return DEFAULT_MODE_CHOICES.includes(v) ? v : PermissionModeValue.Ask;
+    } catch (_) { return PermissionModeValue.Ask; }
+}
+// A new chat (✎, solution change) keeps the mode in use — except Bypass,
+// which never carries over silently into a fresh conversation.
+function applyNewChatPermissionMode() {
+    if (_permissionValue === PermissionModeValue.Bypass) setPermission(defaultPermissionMode());
+}
+function setDefaultPermissionMode(value) {
+    if (!DEFAULT_MODE_CHOICES.includes(value)) return;
+    try { localStorage.setItem(StorageKey.DefaultPermissionMode, value); } catch (_) { }
+    if (!isStreaming) setPermission(value); // show it right away; a running turn keeps its mode
+}
+
+// Same four modes as the official VS Code extension. Keys are the wire values
+// the agent's PermissionMode enum reads (case-insensitive).
+const PERMISSION_MODES = {
+    ask: { icon: "✋", label: "permMode.ask" },
+    acceptEdits: { icon: "✏️", label: "permMode.acceptEdits" },
+    plan: { icon: "📋", label: "permMode.plan" },
+    auto: { icon: "⚡", label: "permMode.auto" },
+    // Not in VS Code's menu; kept for those who want it, marked dangerous.
+    bypassPermissions: { icon: "⚠️", label: "permMode.bypassShort", danger: true }
+};
+let _permissionValue = defaultPermissionMode();
+const defaultModeSelect = document.getElementById("default-mode-select");
+if (defaultModeSelect) defaultModeSelect.value = _permissionValue;
 const permissionSelect = {
     get value() { return _permissionValue; },
     set value(v) { _permissionValue = v; updatePermissionButton(); updatePermissionItems(); }
@@ -1570,8 +1655,11 @@ function setPermission(value) {
 }
 
 function updatePermissionButton() {
-    permissionBtnIcon.textContent = PERMISSION_ICONS[_permissionValue] || "🔒";
-    permissionBtnLabel.textContent = _permissionValue;
+    const mode = PERMISSION_MODES[_permissionValue] || PERMISSION_MODES.ask;
+    permissionBtnIcon.textContent = mode.icon;
+    permissionBtnLabel.textContent = t(mode.label);
+    // Stays red for as long as the dangerous mode is active.
+    document.getElementById("permission-btn").classList.toggle("mode-danger-active", !!mode.danger);
 }
 
 function updatePermissionItems() {
@@ -1587,6 +1675,206 @@ document.addEventListener("click", (e) => {
     if (permissionPopup.hidden) return;
     if (!permissionControl.contains(e.target)) permissionPopup.hidden = true;
 }, true);
+// ── Composer toolbar (VS Code-style): + menu, /, context ring, Remote Control ──
+// Message types introduced here; the rest of the page still uses literals until
+// the constants refactor moves them all into one table.
+const MsgType = Object.freeze({
+    GetContextUsage: "get-context-usage",
+    ToolUse: "tool_use",
+    ToolResult: "tool_result",
+    ToolError: "tool_error",
+    RemoteControl: "remote-control",
+    RemoteControlResult: "remote-control-result",
+    RemoteState: "remote-state"
+});
+const RemoteState = Object.freeze({ Off: "off", Pending: "pending", Connecting: "connecting", Connected: "connected", Error: "error" });
+// The CLI's own bridge_state values (its vocabulary, not ours).
+const BridgeState = Object.freeze({ Ready: "ready", Connected: "connected", Disconnected: "disconnected", Failed: "failed" });
+
+const attachControl = document.getElementById("attach-control");
+const attachPopup = document.getElementById("attach-popup");
+function toggleAttachMenu() { attachPopup.hidden = !attachPopup.hidden; }
+attachPopup.addEventListener("click", () => { attachPopup.hidden = true; }); // items keep their own handlers
+document.addEventListener("click", e => {
+    if (!attachPopup.hidden && !attachControl.contains(e.target)) attachPopup.hidden = true;
+}, true);
+
+// "/" opens the slash-command list on an empty composer. Picking a command
+// replaces the composer text, so with a draft present it only prefixes "/"
+// and leaves the draft intact.
+function openSlashCommands() {
+    textarea.focus();
+    if (!textarea.value.trim()) {
+        textarea.value = "/";
+        textarea.setSelectionRange(1, 1);
+        textarea.dispatchEvent(new Event("input"));
+    } else if (!textarea.value.startsWith("/")) {
+        textarea.value = "/" + textarea.value;
+        textarea.setSelectionRange(1, 1);
+    }
+}
+
+// Context ring: how full the session's context window is (always shown, empty
+// until the first reply). Fed by the same "context-usage" reply as the ⌘ card,
+// refreshed after every completed turn. Click = compact now (VS Code-like);
+// the detailed breakdown stays in the ⌘ menu.
+const ctxRing = document.getElementById("ctx-ring");
+const CTX_RING_CIRCUMFERENCE = 2 * Math.PI * 8;
+const COMPACT_COMMAND = "/compact";
+let _ctxKnown = false;
+function paintContextRing(pct) {
+    document.getElementById("ctx-ring-fill").style.strokeDasharray = `${(pct / 100) * CTX_RING_CIRCUMFERENCE} ${CTX_RING_CIRCUMFERENCE}`;
+    ctxRing.classList.toggle("ctx-high", pct >= 80);
+}
+function updateContextRing(usageJson) {
+    let u;
+    try { u = JSON.parse(usageJson || ""); } catch (_) { return; }
+    const pct = Number(u && u.percentage);
+    if (!Number.isFinite(pct)) return;
+    const clamped = Math.max(0, Math.min(100, pct));
+    _ctxKnown = true;
+    paintContextRing(clamped);
+    ctxRing.title = t("composer.contextTitle", { pct: Math.round(clamped), used: fmtTokens(u.totalTokens || 0), max: fmtTokens(u.rawMaxTokens || 0) });
+}
+function refreshContextRing() {
+    try { window.chrome.webview.postMessage({ type: MsgType.GetContextUsage }); } catch (_) { }
+}
+function resetContextRing() {
+    _ctxKnown = false;
+    paintContextRing(0);
+    ctxRing.title = t("composer.contextUnknown");
+}
+// Goes through the send queue (never the composer), so a draft or attachment
+// isn't swept into it, and it waits its turn if one is running.
+function compactNow() {
+    if (!_ctxKnown) return; // nothing to compact before the first reply
+    _sendQueue.push({ text: COMPACT_COMMAND, attachments: [], fullMessage: COMPACT_COMMAND });
+    drainSendQueue();
+}
+
+// Running subagents (Task/Agent tool calls between tool_use and their result):
+// a pill with the count, and a popover listing them — click a row to jump to
+// its chip in the transcript.
+const AGENT_TOOLS = new Set(["Task", "Agent"]);
+const _runningAgents = new Map(); // tool id → { type, description, startedAt }
+const agentsControl = document.getElementById("agents-control");
+const agentsPopup = document.getElementById("agents-popup");
+function trackAgentTool(kind, name, inputJson, id) {
+    if (!id) return;
+    if (kind === MsgType.ToolUse && AGENT_TOOLS.has(name)) {
+        if (_runningAgents.has(id)) return; // stream + transcript both report it
+        let input = {};
+        try { input = JSON.parse(inputJson || "{}") || {}; } catch (_) { }
+        _runningAgents.set(id, { type: input.subagent_type || name, description: input.description || "", startedAt: Date.now() });
+    } else if ((kind === MsgType.ToolResult || kind === MsgType.ToolError) && _runningAgents.has(id)) {
+        _runningAgents.delete(id);
+    } else return;
+    renderAgentsPill();
+}
+function clearRunningAgents() {
+    _runningAgents.clear();
+    renderAgentsPill();
+}
+function renderAgentsPill() {
+    const n = _runningAgents.size;
+    agentsControl.hidden = n === 0;
+    if (n === 0) agentsPopup.hidden = true;
+    document.getElementById("agents-label").textContent = t(n === 1 ? "agents.one" : "agents.many", { n });
+    if (!agentsPopup.hidden) renderAgentsPopup();
+}
+function renderAgentsPopup() {
+    const header = document.createElement("div");
+    header.className = "mode-popup-header";
+    header.textContent = t("agents.header");
+    const rows = [..._runningAgents].map(([id, a]) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "permission-item agents-row";
+        const secs = Math.max(0, Math.round((Date.now() - a.startedAt) / 1000));
+        const title = document.createElement("span");
+        title.className = "agents-row-type";
+        title.textContent = a.type;
+        const desc = document.createElement("span");
+        desc.className = "agents-row-desc";
+        desc.textContent = a.description;
+        const time = document.createElement("span");
+        time.className = "agents-row-time";
+        time.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+        row.append(title, desc, time);
+        row.addEventListener("click", () => {
+            agentsPopup.hidden = true;
+            messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        });
+        return row;
+    });
+    agentsPopup.replaceChildren(header, ...rows);
+}
+function toggleAgentsPopup() {
+    agentsPopup.hidden = !agentsPopup.hidden;
+    if (!agentsPopup.hidden) renderAgentsPopup();
+}
+document.addEventListener("click", e => {
+    if (!agentsPopup.hidden && !agentsControl.contains(e.target)) agentsPopup.hidden = true;
+}, true);
+
+// Remote Control: continue this session from claude.ai/code or the Claude app.
+// The choice persists; it is applied to the live claude right away, or at the
+// next message when none is running yet.
+let _remote = { state: RemoteState.Off, url: null };
+function remoteControlEnabled() {
+    try { return localStorage.getItem(StorageKey.RemoteControl) === "true"; } catch (_) { return false; }
+}
+function toggleRemoteControl() {
+    const on = !remoteControlEnabled();
+    try { localStorage.setItem(StorageKey.RemoteControl, String(on)); } catch (_) { }
+    _remote = { state: on ? RemoteState.Connecting : RemoteState.Off, url: null };
+    renderRemoteControl();
+    try { window.chrome.webview.postMessage({ type: MsgType.RemoteControl, enabled: on }); } catch (_) { }
+}
+function onRemoteControlResult(text, error) {
+    let r = null;
+    try { r = JSON.parse(text || "null"); } catch (_) { }
+    if (error || !r || r.error) {
+        _remote = { state: RemoteState.Error, url: null };
+        showToast(t("rc.failed"));
+    } else if (!r.enabled) {
+        _remote = { state: RemoteState.Off, url: null };
+    } else {
+        _remote = { state: r.pending ? RemoteState.Pending : RemoteState.Connected, url: r.url || _remote.url };
+    }
+    renderRemoteControl();
+}
+function onRemoteState(bridgeState) {
+    if (!remoteControlEnabled()) return;
+    if (bridgeState === BridgeState.Connected) _remote.state = RemoteState.Connected;
+    else if (bridgeState === BridgeState.Ready && _remote.state !== RemoteState.Connected) _remote.state = RemoteState.Connecting;
+    else if (bridgeState === BridgeState.Disconnected || bridgeState === BridgeState.Failed) _remote.state = RemoteState.Error;
+    renderRemoteControl();
+}
+// A cleared/reset chat kills claude; the switch survives and reconnects with
+// the next message.
+function remoteControlSessionEnded() {
+    _remote = { state: remoteControlEnabled() ? RemoteState.Pending : RemoteState.Off, url: null };
+    renderRemoteControl();
+}
+function renderRemoteControl() {
+    const btn = document.getElementById("rc-btn");
+    btn.dataset.state = _remote.state;
+    btn.title = t("rc." + _remote.state) + (_remote.url ? "\n" + _remote.url : "");
+    btn.querySelector(".rc-open")?.remove();
+    if (_remote.state === RemoteState.Connected && _remote.url) {
+        const a = document.createElement("a");
+        a.className = "rc-open";
+        a.href = _remote.url;
+        a.target = "_blank"; // NewWindowRequested → default browser
+        a.textContent = "↗";
+        a.title = t("rc.open");
+        a.addEventListener("click", e => e.stopPropagation());
+        btn.appendChild(a);
+    }
+}
+remoteControlSessionEnded(); // initial: pending if the switch was left on
+
 const timingSelect = document.getElementById("timing-select");
 (function () {
     const saved = localStorage.getItem("timingMode") || "simple";
@@ -1675,9 +1963,9 @@ messages.addEventListener("click", e => {
         if (!codeEl) return;
         const code = codeEl.innerText.replace(/\r\n/g, "\n");
         const flash = () => {
-            copyBtn.textContent = "Copied";
+            copyBtn.textContent = t("code.copied");
             copyBtn.classList.add("copied");
-            setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 1200);
+            setTimeout(() => { copyBtn.textContent = t("code.copy"); copyBtn.classList.remove("copied"); }, 1200);
         };
         try {
             navigator.clipboard.writeText(code).then(flash, flash);
@@ -1705,7 +1993,7 @@ messages.addEventListener("click", e => {
     const language = langMatch ? langMatch[1] : "";
     window.chrome.webview.postMessage({ type: "apply-to-editor", code, language });
     const orig = btn.textContent;
-    btn.textContent = "Applied";
+    btn.textContent = t("code.applied");
     btn.classList.add("applied");
     setTimeout(() => { btn.textContent = orig; btn.classList.remove("applied"); }, 1200);
 });
@@ -1763,7 +2051,7 @@ function decorateMessage(msgEl) {
     msgEl.dataset.msgIndex = idx;
     const btn = document.createElement("button");
     btn.className = "msg-branch";
-    btn.title = "Branch from here";
+    btn.title = t("msg.branch");
     btn.textContent = "⎇";
     btn.addEventListener("click", () => branchFromMessage(idx));
     msgEl.appendChild(btn);
@@ -1775,7 +2063,7 @@ function decorateMessage(msgEl) {
         msgEl.dataset.userIndex = uidx;
         const rb = document.createElement("button");
         rb.className = "msg-rewind";
-        rb.title = "Rewind files to before this message";
+        rb.title = t("msg.rewind");
         rb.textContent = "⟲";
         rb.addEventListener("click", () => rewindFromMessage(uidx));
         msgEl.appendChild(rb);
@@ -1793,7 +2081,7 @@ function branchFromMessage(idx) {
 function rewindFromMessage(idx) {
     if (!currentSessionId) return;
     if (idx < _rewindBaseUserIdx) {
-        showToast("This message is from a previous CLI session — rewind can't reach it");
+        showToast(t("rewind.prevSession"));
         return;
     }
     // dry run first → preview stats → confirm → apply. The backend indexes into
@@ -1805,7 +2093,7 @@ function rewindFromMessage(idx) {
 function showRewindConfirm(idx, result) {
     const files = (result && result.filesChanged) || [];
     if (!result || !result.canRewind || files.length === 0) {
-        showToast("Nothing to rewind for this message");
+        showToast(t("rewind.nothing"));
         return;
     }
     const ins = result.insertions || 0;
@@ -1813,11 +2101,11 @@ function showRewindConfirm(idx, result) {
     const card = document.createElement("div");
     card.className = "question-card rewind-confirm-card";
     card.innerHTML = `
-<div class="question-text">⟲ <strong>Rewind files to before this message?</strong> ${del} line${del === 1 ? "" : "s"} removed and ${ins} added across ${files.length} file${files.length === 1 ? "" : "s"}. The conversation is kept — only files revert.</div>
+<div class="question-text">⟲ <strong>${t("rewind.confirmTitle")}</strong> ${t("rewind.confirmBody", { del, delS: del === 1 ? "" : "s", ins, files: files.length, filesS: files.length === 1 ? "" : "s" })}</div>
 <ul class="rewind-file-list">${files.map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul>
 <div class="question-buttons">
-<button class="q-btn q-yes">Rewind files</button>
-<button class="q-btn">Cancel</button>
+<button class="q-btn q-yes">${t("rewind.button")}</button>
+<button class="q-btn">${t("common.cancel")}</button>
 </div>`;
     const btns = card.querySelectorAll("button");
     btns[0].addEventListener("click", () => {
@@ -1842,21 +2130,22 @@ function setStreaming(on) {
 
 btnSend.addEventListener("click", () => {
     if (isStreaming) {
-        window.chrome.webview.postMessage({ type: "cancel" });
+        window.chrome.webview.postMessage({ type: "cancel", turnSeq: _turnSeq });
         setStreaming(false);
+        _awaitingCancelDone = true;
         removeLoading();
         removeLiveTimer();
         if (currentStreamBubble) {
             finalizeBubbleStream(currentStreamBubble);
             const cancelled = document.createElement("span");
             cancelled.className = "cancelled";
-            cancelled.textContent = "⊘ cancelled";
+            cancelled.textContent = t("msg.cancelled");
             currentStreamBubble.appendChild(cancelled);
             currentStreamBubble = null;
         } else {
             const msg = document.createElement("div");
             msg.className = "message assistant";
-            msg.innerHTML = '<div class="bubble"><span class="cancelled">⊘ cancelled</span></div>';
+            msg.innerHTML = `<div class="bubble"><span class="cancelled">${t("msg.cancelled")}</span></div>`;
             messages.appendChild(msg);
             autoScroll();
         }
@@ -1884,20 +2173,37 @@ document.getElementById("btn-selection").addEventListener("click", () => {
 const autocompleteEl = document.getElementById("cmd-autocomplete");
 let acIndex = -1;
 
-const builtinCommands = ["/model", "/usage", "/compact", "/review", "/clear"];
+const builtinCommands = ["/model", "/usage", "/compact", "/review", "/clear", "/plugin"];
 
+// Contains-match on the name ("/grill" finds "/mattpocock-skills:grilling"),
+// ranked: name starts with it, then a ":"-segment starts with it, then anywhere.
 function getMatchingCommands(query) {
     const all = [...new Set([...builtinCommands, ...customCommands.map(c => c.command), ...discoveredSlashCommands])];
-    return query === "/" ? all : all.filter(c => c.startsWith(query));
+    const q = query.replace(/^\//, "").toLowerCase();
+    if (!q) return all;
+    const rank = cmd => {
+        const name = cmd.replace(/^\//, "").toLowerCase();
+        if (name.startsWith(q)) return 0;
+        if (name.split(":").some(part => part.startsWith(q))) return 1;
+        return name.includes(q) ? 2 : -1;
+    };
+    return all
+        .map((cmd, i) => ({ cmd, i, r: rank(cmd) }))
+        .filter(x => x.r >= 0)
+        .sort((a, b) => a.r - b.r || a.i - b.i)
+        .map(x => x.cmd);
 }
 
 function showAutocomplete(query) {
     const cmds = getMatchingCommands(query);
     if (cmds.length === 0) { hideAutocomplete(); return; }
     acIndex = -1;
-    autocompleteEl.innerHTML = cmds.map(c =>
-        `<div class="cmd-autocomplete-item" data-cmd="${escapeAttrValue(c)}">${escapeHtml(c)}</div>`
-    ).join("");
+    autocompleteEl.innerHTML = cmds.map(c => {
+        const info = slashCommandInfo.get(c);
+        const desc = info && info.description ? `<span class="cmd-ac-desc">${escapeHtml(info.description)}</span>` : "";
+        const title = info && info.description ? ` title="${escapeAttrValue(info.description)}"` : "";
+        return `<div class="cmd-autocomplete-item" data-cmd="${escapeAttrValue(c)}"${title}><span class="cmd-ac-name">${escapeHtml(c)}</span>${desc}</div>`;
+    }).join("");
     autocompleteEl.querySelectorAll(".cmd-autocomplete-item").forEach(el =>
         el.addEventListener("mousedown", e => { e.preventDefault(); fillAutocomplete(el.dataset.cmd); })
     );
@@ -2026,7 +2332,7 @@ function renderAtList(items) {
 
 function showAtIndexing() {
     atIndex = -1;
-    atAutocompleteEl.innerHTML = `<div class="cmd-autocomplete-item at-loading">Indexing workspace…</div>`;
+    atAutocompleteEl.innerHTML = `<div class="cmd-autocomplete-item at-loading">${t("at.indexing")}</div>`;
     atAutocompleteEl.classList.add("open");
 }
 
@@ -2109,12 +2415,14 @@ textarea.addEventListener("keydown", (e) => {
             e.preventDefault();
             acIndex = Math.min(acIndex + 1, items.length - 1);
             items.forEach((el, i) => el.classList.toggle("ac-selected", i === acIndex));
+            items[acIndex]?.scrollIntoView({ block: "nearest" });
             return;
         }
         if (e.key === "ArrowUp") {
             e.preventDefault();
             acIndex = Math.max(acIndex - 1, 0);
             items.forEach((el, i) => el.classList.toggle("ac-selected", i === acIndex));
+            items[acIndex]?.scrollIntoView({ block: "nearest" });
             return;
         }
         if (e.key === "Tab") {
@@ -2205,7 +2513,7 @@ function showModelPicker() {
     const current = modelSelect.value;
     const card = document.createElement("div");
     card.className = "question-card";
-    card.innerHTML = `<div class="question-text">🤖 Choose the model:</div>
+    card.innerHTML = `<div class="question-text">${t("model.choose")}</div>
         <div class="question-buttons" style="flex-wrap:wrap;gap:6px">
         ${modelList.map(m =>
             `<button class="q-btn${m.id === current ? " q-yes" : ""}" onclick="selectModel('${m.id}',this.closest('.question-card'))">${escapeHtml(m.label)}</button>`
@@ -2274,11 +2582,9 @@ textarea.addEventListener("paste", e => {
 });
 
 function sendMessage() {
-    // A turn is already in flight (possibly still respawning claude — slow and
-    // silent): a second send here queues in the agent and the answers tramples
-    // the transcript (D7 validation 2026-07-16). Stop it — the user can cancel
-    // with ■ first if they really want to abandon the pending turn.
-    if (isStreaming) return;
+    // A send while a turn is in flight goes to _sendQueue and waits for that
+    // turn's stream-done: firing it straight at the agent would trample the
+    // transcript (D7 validation 2026-07-16).
     _userScrolledUp = false;
     const text = textarea.value.trim();
     pushPromptHistory(text);
@@ -2292,15 +2598,14 @@ function sendMessage() {
         return;
     }
 
+    if (text === "/plugin" || text === "/plugins") {
+        textarea.value = "";
+        openPluginsModal();
+        return;
+    }
+
     if (!text && activeAttachments.length === 0)
         return;
-
-    // #7: only one turn is ever in flight (isStreaming guards a second send
-    // above), so a single pending reference is enough — no queue needed.
-    _pendingUserAckBubble = addMessage("user", text || `(${activeAttachments.map(a => a.displayName).join(", ")})`);
-    // Remember which user bubble opened this turn — if the turn spawns a fresh
-    // (non-resumed) session, it becomes the new rewind base.
-    _turnUserIdx = userMsgCounter - 1;
 
     let fullMessage = text;
     const filePaths = [];
@@ -2322,7 +2627,7 @@ function sendMessage() {
         if (!att.includeFile) {
             const card = document.getElementById(`q-card-${id}`);
             if (card) {
-                card.innerHTML = `<div class="question-text">📎 <strong>${escapeHtml(att.displayName)}</strong> — ✗ not sent</div>`;
+                card.innerHTML = `<div class="question-text">📎 <strong>${escapeHtml(att.displayName)}</strong> — ${t("msg.notSent")}</div>`;
                 card.classList.add("question-answered");
             }
         }
@@ -2333,11 +2638,91 @@ function sendMessage() {
     textarea.value = "";
     updateTokenEstimate();
 
+    // Every send goes through the queue; it leaves at once unless a turn runs.
+    _sendQueue.push({ text, attachments: activeAttachments, fullMessage });
+    drainSendQueue();
+}
+
+// ── Send queue: messages sent while a turn is in flight ──────────────────
+// Held here and sent one per turn after stream-done, so each still runs the
+// host's pre-flight gates + ide_selection capture and lands in the JSONL as a
+// real user entry. (The CLI can fold a mid-turn message into the running turn
+// itself, but stores it as a queued_command attachment — invisible to History
+// replay and the ⎇/⟲ ordinals.)
+const _sendQueue = [];
+// Set by ■ until the cancel's own stream-done arrives. Meanwhile sends wait in
+// the queue (that late stream-done would otherwise end the turn just started);
+// when it lands, the next queued message goes out (VS Code behaviour).
+let _awaitingCancelDone = false;
+// Numbers each chat sent to the host; stream-done echoes it. A cancel racing
+// the natural end of a turn yields two stream-dones for that turn — the second
+// must not end the queued turn sent in between.
+let _turnSeq = 0;
+const sendQueueEl = document.getElementById("send-queue");
+
+function renderSendQueue() {
+    sendQueueEl.replaceChildren(..._sendQueue.map(item => {
+        const chip = document.createElement("div");
+        chip.className = "attachment-chip send-queue-item";
+        const label = document.createElement("span");
+        label.className = "send-queue-label";
+        label.textContent = t("queue.label");
+        const body = document.createElement("span");
+        body.className = "send-queue-text";
+        body.textContent = body.title = item.text || item.attachments.map(a => a.displayName).join(", ");
+        const rm = document.createElement("button");
+        rm.className = "attachment-remove";
+        rm.title = t("queue.remove");
+        rm.textContent = "×";
+        rm.addEventListener("click", () => {
+            const i = _sendQueue.indexOf(item);
+            if (i >= 0) _sendQueue.splice(i, 1);
+            renderSendQueue();
+        });
+        chip.append(label, body, rm);
+        return chip;
+    }));
+}
+
+function drainSendQueue() {
+    if (isStreaming || _awaitingCancelDone || !_sendQueue.length) { renderSendQueue(); return; }
+    const next = _sendQueue.shift();
+    renderSendQueue();
+    dispatchMessage(next.text, next.attachments, next.fullMessage);
+}
+
+// The turn ended without completing (■ cancel, a pre-flight gate) or the view
+// moved to another session: hand queued messages back to the composer rather
+// than sending them somewhere the user did not expect. Nothing is lost.
+function restoreSendQueue() {
+    if (!_sendQueue.length) return;
+    const items = _sendQueue.splice(0);
+    renderSendQueue();
+    textarea.value = [...items.map(q => q.text), textarea.value.trim()].filter(Boolean).join("\n\n");
+    for (const q of items)
+        for (const a of q.attachments)
+            if (a.includeFile) addAttachment(a.displayName, a.content, a.content == null, a.filePath);
+    updateTokenEstimate();
+    showToast(t("queue.restored"));
+}
+
+function dispatchMessage(text, activeAttachments, fullMessage) {
+    // #7: only one turn is ever in flight (later sends wait in _sendQueue),
+    // so a single pending reference is enough.
+    _pendingUserAckBubble = addMessage("user", text || `(${activeAttachments.map(a => a.displayName).join(", ")})`);
+    // Remember which user bubble opened this turn — if the turn spawns a fresh
+    // (non-resumed) session, it becomes the new rewind base.
+    _turnUserIdx = userMsgCounter - 1;
+
     if (window.chrome?.webview) {
         setStreaming(true);
         addLoading();
+        perfStartTurn();
         window.chrome.webview.postMessage({
             type: "chat",
+            turnSeq: ++_turnSeq,
+            perfMetrics: _perfEnabled,
+            remoteControl: remoteControlEnabled(),
             text: fullMessage,
             model: modelSelect.value,
             effort: effortSelect.value || null,
@@ -2403,7 +2788,114 @@ function addMessage(role, text) {
     return message;
 }
 
+// ── Perf metrics (⚙ toggle, default off) ────────────────────────────────────
+// Per turn: send→first chunk, message counts, time spent in the message
+// handler, long tasks and janky frames. Durations and counts only — no text.
+let _perfEnabled = localStorage.getItem("perfMetrics") === "true";
+const perfToggle = document.getElementById("perfmetrics-toggle");
+if (perfToggle) perfToggle.checked = _perfEnabled;
+function setPerfMetrics(checked) {
+    _perfEnabled = !!checked;
+    localStorage.setItem("perfMetrics", _perfEnabled);
+    if (_perfEnabled && _agentEndpoint && !_agentSocket) connectAgentSocket(_agentEndpoint.port, _agentEndpoint.token, _agentEndpoint.epoch);
+    if (!_perfEnabled && _agentSocket) { const ws = _agentSocket; _agentSocket = null; try { ws.close(); } catch (_) { } }
+}
+let _perf = null;
+
+function perfStartTurn() {
+    if (!_perfEnabled) { _perf = null; return; }
+    const p = _perf = { t0: performance.now(), ttfcMs: 0, msgs: 0, wsMsgs: 0, chunkMsgs: 0, chunkChars: 0,
+        handlerMs: 0, handlerMaxMs: 0, slowHandlers: 0, longTasks: 0, longTaskMs: 0,
+        frames: 0, jankFrames: 0, maxFrameGapMs: 0, lastFrame: 0 };
+    // Frame gaps are where-the-work-happens agnostic (handler, rAF, layout),
+    // so they stay comparable after rendering moves into rAF (step 6).
+    const frame = ts => {
+        if (_perf !== p) return;
+        if (p.lastFrame) {
+            const gap = ts - p.lastFrame;
+            p.frames++;
+            if (gap > 33) p.jankFrames++;
+            if (gap > p.maxFrameGapMs) p.maxFrameGapMs = gap;
+        }
+        p.lastFrame = ts;
+        requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+}
+
+function perfNote(data, ms, viaSocket) {
+    const p = _perf;
+    if (!p) return;
+    p.msgs++;
+    if (viaSocket) p.wsMsgs++;
+    p.handlerMs += ms;
+    if (ms > p.handlerMaxMs) p.handlerMaxMs = ms;
+    if (ms > 16) p.slowHandlers++;
+    if (data.type === "chunk") {
+        p.chunkMsgs++;
+        p.chunkChars += (data.text || "").length;
+        if (!p.ttfcMs) p.ttfcMs = performance.now() - p.t0;
+    }
+    if (data.type === "stream-done" && (data.turnSeq == null || data.turnSeq === _turnSeq)) {
+        _perf = null;
+        const { t0, lastFrame, ...metrics } = p;
+        metrics.turnMs = performance.now() - t0;
+        try { window.chrome.webview.postMessage({ type: "perf-ui", metrics }); } catch (_) { }
+    }
+}
+
+try {
+    new PerformanceObserver(list => {
+        if (!_perf) return;
+        for (const e of list.getEntries()) { _perf.longTasks++; _perf.longTaskMs += e.duration; }
+    }).observe({ type: "longtask" });
+} catch (_) { /* longtask unsupported */ }
+
+// ── Direct agent socket (WebSocket transport) ───────────────────────────────
+// Step 1 prototype: connect, authenticate, ping round trip. Streaming moves
+// here in step 2. Until then it only runs with ⚙ Performance metrics on (it
+// measures the round trip). The token is never logged.
+let _agentSocket = null;
+let _agentEpoch = 0;
+let _agentEndpoint = null; // last agent-endpoint, so switching metrics on can connect
+
+function connectAgentSocket(port, token, epoch) {
+    if (!_perfEnabled) return;
+    if (epoch < _agentEpoch || (epoch === _agentEpoch && _agentSocket)) return; // stale or duplicate
+    _agentEpoch = epoch;
+    if (_agentSocket) { try { _agentSocket.close(); } catch (_) { } }
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+    _agentSocket = ws;
+    let pingAt = 0;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token }));
+    ws.onmessage = ev => {
+        if (ws !== _agentSocket) return; // an older epoch's socket
+        let data;
+        try { data = JSON.parse(ev.data); } catch (_) { return; }
+        if (data.type === "ws-hello") { pingAt = performance.now(); ws.send(JSON.stringify({ type: "ping" })); return; }
+        if (data.type === "pong") { console.log(`[ws] epoch ${epoch}: connected, round trip ${(performance.now() - pingAt).toFixed(1)} ms`); return; }
+    };
+    ws.onclose = ev => {
+        if (ws !== _agentSocket) return;
+        _agentSocket = null;
+        console.log(`[ws] epoch ${epoch}: closed (code ${ev.code})`);
+    };
+}
+
 window.chrome.webview.addEventListener("message", event => {
+    if (!_perf) return handleHostMessage(event);
+    const t = performance.now();
+    handleHostMessage(event);
+    perfNote(event.data, performance.now() - t, false);
+});
+
+function handleHostMessage(event) {
+
+    if (event.data.type === "agent-endpoint") {
+        _agentEndpoint = { port: event.data.port, token: event.data.token, epoch: event.data.epoch };
+        connectAgentSocket(_agentEndpoint.port, _agentEndpoint.token, _agentEndpoint.epoch);
+        return;
+    }
 
     if (event.data.type === "focus") {
         textarea.focus();
@@ -2583,12 +3075,12 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "rewind-done") {
-        showToast("Files reverted ✓");
+        showToast(t("rewind.done"));
         return;
     }
 
     if (event.data.type === "rewind-error") {
-        showToast(event.data.message || "Rewind failed");
+        showToast(event.data.message || t("rewind.failed"));
         return;
     }
 
@@ -2643,6 +3135,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "stream-done") {
+        if (event.data.turnSeq != null && event.data.turnSeq !== _turnSeq) return; // an older turn's
         // Turn over: clear any stale pending marker (cancel/dismiss paths skip
         // the modal close hooks); flag "done" only when the window is hidden.
         setCaptionAttention(_toolWindowVisible ? null : "done");
@@ -2663,11 +3156,26 @@ window.chrome.webview.addEventListener("message", event => {
         // #7 safety: no ack can outlive the turn either (cancel, or an older
         // CLI that silently ignores --replay-user-messages).
         _pendingUserAckBubble = null;
+        // Queued sends: a completed turn — or a ■ with messages waiting — hands
+        // over to the next queued one; a pre-flight gate returns them to the
+        // composer. Deferred so perfNote closes THIS turn's metrics first.
+        clearRunningAgents();
+        if (event.data.completed || _awaitingCancelDone) {
+            if (event.data.completed) refreshContextRing();
+            _awaitingCancelDone = false;
+            setTimeout(drainSendQueue, 0);
+        } else restoreSendQueue();
         return;
     }
 
     if (event.data.type === "tool_use" || event.data.type === "tool_result" || event.data.type === "tool_error") {
         appendToolEvent(event.data.type, event.data.name || "", event.data.input, event.data.text || "", event.data.id);
+        trackAgentTool(event.data.type, event.data.name || "", event.data.input, event.data.id);
+        return;
+    }
+
+    if (event.data.type === "tool_files") {
+        renderToolFiles(event.data.id, event.data.text || "", event.data.name);
         return;
     }
 
@@ -2696,8 +3204,8 @@ window.chrome.webview.addEventListener("message", event => {
             if (status !== _lastRateLimitStatus) {
                 _lastRateLimitStatus = status;
                 const resetStr = info.resetsAt ? new Date(info.resetsAt * 1000).toLocaleString() : "";
-                const overage = info.isUsingOverage ? " · using overage" : "";
-                showToast(`⚠ Rate limit: ${status}${overage}${resetStr ? " · resets " + resetStr : ""}`);
+                const overage = info.isUsingOverage ? t("rateLimit.overage") : "";
+                showToast(t("rateLimit.toast", { status, overage, reset: resetStr ? t("rateLimit.resets", { time: resetStr }) : "" }));
             }
         } catch (e) { /* unexpected shape — skip rather than show garbage */ }
         return;
@@ -2718,7 +3226,7 @@ window.chrome.webview.addEventListener("message", event => {
             const meta = JSON.parse(event.data.text || "{}");
             const pre = fmtTokens(meta.pre_tokens || 0);
             const post = fmtTokens(meta.post_tokens || 0);
-            insertOrUpdateModelDivider(`🗜️ Compacted: ${pre} → ${post} tokens`);
+            insertOrUpdateModelDivider(t("compact.done", { pre, post }));
         } catch (e) { /* unexpected shape — skip rather than show garbage */ }
         return;
     }
@@ -2731,7 +3239,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "budget-exceeded") {
-        showToast(`💸 ${event.data.detail || "Max budget reached"}`);
+        showToast(`💸 ${event.data.detail || t("budget.reached")}`);
         return;
     }
 
@@ -2757,7 +3265,18 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "context-usage") {
+        updateContextRing(event.data.usage);
         renderContextUsageCard(event.data.usage || null, event.data.error || null);
+        return;
+    }
+
+    if (event.data.type === MsgType.RemoteControlResult) {
+        onRemoteControlResult(event.data.text, event.data.error);
+        return;
+    }
+
+    if (event.data.type === MsgType.RemoteState) {
+        onRemoteState(event.data.text);
         return;
     }
 
@@ -2785,15 +3304,18 @@ window.chrome.webview.addEventListener("message", event => {
         // Refresh the open card so the row reflects the post-reconnect state.
         if (event.data.error && _pendingMcpCard) {
             const btn = _pendingMcpCard.querySelector(`.mcp-status-row[data-server="${CSS.escape(event.data.server || "")}"] .mcp-reconnect-btn`);
-            if (btn) { btn.disabled = false; btn.textContent = "Reconnect"; }
+            if (btn) { btn.disabled = false; btn.textContent = t("mcp.reconnect"); }
         }
         try { window.chrome.webview.postMessage({ type: "get-mcp-status" }); } catch (e) {}
         return;
     }
 
+    if (event.data.type === PluginMsg.Data) { onPluginsData(event.data); return; }
+    if (event.data.type === PluginMsg.Result) { onPluginsResult(event.data); return; }
+
     if (event.data.type === "slash-commands") {
         renderSlashCommands(event.data.project || [], event.data.user || [],
-            event.data.projectSkills || [], event.data.userSkills || []);
+            event.data.projectSkills || [], event.data.userSkills || [], event.data.cli || null);
         return;
     }
 
@@ -2829,6 +3351,10 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "reset-chat") {
         // Triggered by solution open/close from C# side. Same UX as the user
         // clicking the ✎ button, minus posting "clear" back (backend already reset).
+        resetContextRing();
+        clearRunningAgents();
+        remoteControlSessionEnded();
+        applyNewChatPermissionMode();
         messages.innerHTML = `
             <div class="welcome">
                 <div class="hero"><span class="logo">✺</span> Claude Code Studio</div>
@@ -2846,6 +3372,8 @@ window.chrome.webview.addEventListener("message", event => {
         updateUsageSessionValues();
         _suppressNextAutoResume = true;
         permissionQueue = [];
+        _sendQueue.length = 0;
+        renderSendQueue();
         return;
     }
 
@@ -2857,7 +3385,7 @@ window.chrome.webview.addEventListener("message", event => {
         }
         return;
     }
-});
+}
 
 let pendingPermissionToolId = null;
 let pendingPermissionToolName = null;
@@ -2907,7 +3435,7 @@ function openPermissionModal(tool, input, id, cwd) {
     if (tool === "ExitPlanMode") {
         // Plan approval gate: show the plan markdown itself, not escaped JSON.
         // Render it as Markdown for proper formatting and readability.
-        document.getElementById("perm-modal-tool").textContent = "Approve plan? (ExitPlanMode)";
+        document.getElementById("perm-modal-tool").textContent = t("perm.approvePlan");
         try { formatted = JSON.parse(input).plan || input; } catch (_) { /* leave as-is */ }
         isPlan = true;
     } else if (tool === "Skill") {
@@ -2916,7 +3444,7 @@ function openPermissionModal(tool, input, id, cwd) {
         try {
             const parsed = JSON.parse(input);
             const s = String(parsed.skill || "").replace(/^\//, "");
-            if (s) document.getElementById("perm-modal-tool").textContent = `Use skill /${s}? (Skill)`;
+            if (s) document.getElementById("perm-modal-tool").textContent = t("perm.useSkill", { skill: s });
             formatted = JSON.stringify(parsed, null, 2);
         } catch (_) { /* leave as-is */ }
     } else if (input) {
@@ -2924,7 +3452,7 @@ function openPermissionModal(tool, input, id, cwd) {
         catch (_) { /* leave as-is */ }
     }
     if (isPlan && typeof marked !== "undefined") {
-        inputContainer.innerHTML = marked.parse(formatted || "(no input)");
+        inputContainer.innerHTML = marked.parse(formatted || t("perm.noInput"));
         // marked emits plain <a href>; rewire them like the chat does so a click
         // opens in the VS editor (workspace file refs) or the browser (external
         // links), never navigating the WebView away from the app to a dead page.
@@ -2943,7 +3471,7 @@ function openPermissionModal(tool, input, id, cwd) {
             }
         });
     } else {
-        inputContainer.textContent = formatted || "(no input)";
+        inputContainer.textContent = formatted || t("perm.noInput");
     }
 
     // A plan or a long input can be widened (drag handle on the right edge); a
@@ -2958,7 +3486,7 @@ function openPermissionModal(tool, input, id, cwd) {
     }
 
     document.getElementById("perm-modal-overlay").classList.add("open");
-    renderPresence("waiting", "permission prompt");
+    renderPresence("waiting", t("presence.permission"));
     // claude is blocked on our PreToolUse hook response — same as an
     // AskUserQuestion card, this shouldn't count as "working" time.
     pauseLiveTimer();
@@ -2984,7 +3512,7 @@ function retractPermissionRequest(id, reason) {
     const div = document.createElement("div");
     div.className = "model-divider";
     div.innerHTML = `<span class="model-divider-label"></span>`;
-    div.querySelector(".model-divider-label").textContent = "🔒 Permission closed — " + (reason || "resolved without an answer");
+    div.querySelector(".model-divider-label").textContent = t("perm.closed", { reason: reason || t("perm.closedNoAnswer") });
     messages.appendChild(div);
     autoScroll();
 }
@@ -3031,12 +3559,12 @@ function permissionAllow() {
     // planning on its own) — mirror that on the composer pill, or the next
     // send claims perm=plan while the session is really in default mode
     // (bloco 20 desync, validation 2026-07-18). Deny keeps everything in plan.
-    if (wasPlanApproval && _permissionValue === "plan") {
-        setPermission("ask");
+    if (wasPlanApproval && _permissionValue === PermissionModeValue.Plan) {
+        setPermission(PermissionModeValue.Ask);
         const div = document.createElement("div");
         div.className = "model-divider";
         div.innerHTML = `<span class="model-divider-label"></span>`;
-        div.querySelector(".model-divider-label").textContent = "📋 Plan approved — permission mode back to ask";
+        div.querySelector(".model-divider-label").textContent = t("perm.planApproved");
         messages.appendChild(div);
         autoScroll();
     }
@@ -3238,10 +3766,10 @@ function renderPermRules() {
         const list = document.getElementById(`perm-rules-${bucket}`);
         const items = rules[bucket];
         list.innerHTML = items.length === 0
-            ? `<div class="perm-rules-empty">No rules.</div>`
+            ? `<div class="perm-rules-empty">${t("rules.empty")}</div>`
             : items.map((r, i) =>
                 `<div class="perm-rule-row"><span class="perm-rule-text">${escapeHtml(r)}</span>` +
-                `<button type="button" class="perm-rule-remove" title="Remove" onclick="removePermRule('${bucket}',${i})">✕</button></div>`
+                `<button type="button" class="perm-rule-remove" title="${t("common.remove")}" onclick="removePermRule('${bucket}',${i})">✕</button></div>`
             ).join("");
     }
 }
@@ -3280,9 +3808,9 @@ function permRuleError(rule) {
     if (PERM_RULE_RE.test(rule)) return null;
     if (/^[A-Za-z_][A-Za-z0-9_.-]*\s+\S/.test(rule)) {
         const tool = rule.split(/\s+/)[0];
-        return `Put the specifier in parentheses — ${tool}(${rule.slice(tool.length).trim()}) — or use just ${tool} to match every call.`;
+        return t("rules.errSpecifier", { fixed: `${tool}(${rule.slice(tool.length).trim()})`, tool });
     }
-    return "Expected Tool or Tool(specifier), e.g. PowerShell(git *).";
+    return t("rules.errFormat");
 }
 
 function showPermRuleError(bucket, message) {
@@ -3346,8 +3874,8 @@ function onBuildErrors(msg) {
         if (msg.prompt === _lastBuildErrorsSig) return;
         if (isStreaming) return;
     } else {
-        if (!msg.errorCount) { showToast("No build errors in the Error List"); return; }
-        if (isStreaming) { showToast("A turn is in progress — try again when it finishes"); return; }
+        if (!msg.errorCount) { showToast(t("build.none")); return; }
+        if (isStreaming) { showToast(t("turn.busyRetry")); return; }
     }
     _lastBuildErrorsSig = msg.prompt;
     textarea.value = msg.prompt;
@@ -3364,7 +3892,7 @@ function runEditorAction(instruction, block) {
     const composed = instruction + "\n\n" + block;
     if (isStreaming) {
         insertAtCursor(composed);
-        showToast("A turn is in progress — press send when it finishes");
+        showToast(t("turn.busySend"));
         return;
     }
     textarea.value = composed;
@@ -3388,7 +3916,7 @@ function sendBackgroundCheck() {
 // ⌘ menu: on-demand check.
 function checkBackgroundTasks() {
     document.getElementById("cmd-menu").classList.remove("open");
-    if (isStreaming) { showToast("A turn is in progress — try again when it finishes"); return; }
+    if (isStreaming) { showToast(t("turn.busyRetry")); return; }
     sendBackgroundCheck();
 }
 
@@ -3440,7 +3968,8 @@ function syncAppearanceToHost() {
         window.chrome.webview.postMessage({
             type: "set-appearance",
             themeMode: localStorage.getItem("themeOverride") || "auto",
-            accent: localStorage.getItem("accentCustom") || ""
+            accent: currentAccentOverride(),
+            uiLanguage: getUiLanguagePref()
         });
     } catch (_) { }
 }
@@ -3452,10 +3981,27 @@ function applyThemeOverride() {
     else if (mode === "light") isDark = false;
     else isDark = _lastVsIsDark;
     document.documentElement.classList.toggle("light-theme", !isDark);
+    updateOnAccent(); // the default accent differs per theme
 }
 
 // Apply on load so the choice is visible even before the first VS theme event.
 applyThemeOverride();
+
+// UI language (i18n.js): the select mirrors localStorage "uiLanguage". Static
+// markup is re-filled by applyI18n; labels app.js owns are re-rendered here.
+document.getElementById("ui-language").value = getUiLanguagePref();
+function onUiLanguageChanged() {
+    updatePermissionButton();
+    updateEffortButton(+effortPopupSlider.value);
+    autoSaveLabel.textContent = t("autosave." + autoSaveValues[+autoSaveSlider.value]);
+    renderCwd();
+    if (_accountInfo) renderAccountInfo();
+    updateUsageSessionValues();
+    updateHistoryHint();
+    renderRemoteControl();
+    if (_ctxKnown) refreshContextRing(); else resetContextRing(); // tooltip text is built from the reply
+    renderAgentsPill();
+}
 
 // Issue #10: how the AskUserQuestion picker submits — "instant" (default,
 // send on click) or "always" (always show Submit; options toggle and combine
@@ -3471,8 +4017,26 @@ function getAskMode() { return localStorage.getItem("askMode") === "always" ? "a
 // Empty localStorage = default (CSS cascade: #d88763 dark, #b05c35 light).
 // Reset button clears the override and snaps back to the brand default.
 const ACCENT_DEFAULT = "#d88763";
+// "Colored accents" off: one mid gray that reads both as a fill under white
+// text (user bubble, send button) and as text on the dark/light backgrounds.
+const ACCENT_NEUTRAL = "#707070";
 const accentCustomInput = document.getElementById("accent-custom");
+const accentEnabledToggle = document.getElementById("accent-enabled-toggle");
 accentCustomInput.value = localStorage.getItem("accentCustom") || ACCENT_DEFAULT;
+
+function accentEnabled() { return localStorage.getItem("accentOff") !== "true"; }
+
+// The --accent override in effect, or "" for the theme's brand default.
+function currentAccentOverride() {
+    return accentEnabled() ? (localStorage.getItem("accentCustom") || "") : ACCENT_NEUTRAL;
+}
+
+function setAccentEnabled(checked) {
+    if (checked) localStorage.removeItem("accentOff");
+    else localStorage.setItem("accentOff", "true");
+    applyAccent();
+    syncAppearanceToHost();
+}
 
 function setAccentCustom(value) {
     localStorage.setItem("accentCustom", value);
@@ -3482,15 +4046,36 @@ function setAccentCustom(value) {
 
 function resetAccent() {
     localStorage.removeItem("accentCustom");
+    localStorage.removeItem("accentOff");
     accentCustomInput.value = ACCENT_DEFAULT;
     applyAccent();
     syncAppearanceToHost();
 }
 
 function applyAccent() {
-    const color = localStorage.getItem("accentCustom");
+    const color = currentAccentOverride();
     if (color) document.documentElement.style.setProperty("--accent", color);
     else document.documentElement.style.removeProperty("--accent");
+    if (accentEnabledToggle) accentEnabledToggle.checked = accentEnabled();
+    accentCustomInput.disabled = !accentEnabled();
+    updateOnAccent();
+}
+
+// Text drawn ON an accent fill (your message bubble, send button, primary
+// buttons) used to be fixed white — a white or pale custom accent made it
+// vanish. Switch to dark text once white gets hard to read on the accent.
+// ponytail: fixed threshold (white contrast < 2.5:1) keeps the default orange's
+// white text as designed; a full AA rule would flip the default orange too.
+function updateOnAccent() {
+    const root = document.documentElement;
+    const hex = getComputedStyle(root).getPropertyValue("--accent").trim();
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex);
+    if (!m) { root.style.removeProperty("--on-accent"); return; }
+    const h = m[1].length === 3 ? m[1].replace(/./g, c => c + c) : m[1];
+    const lin = i => { const c = parseInt(h.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const luminance = 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4);
+    const whiteContrast = 1.05 / (luminance + 0.05);
+    root.style.setProperty("--on-accent", whiteContrast < 2.5 ? "#1e1e1e" : "#ffffff");
 }
 
 applyAccent();
@@ -3684,25 +4269,25 @@ function clearCostLimit(which) {
 // Non-setting data (prompt history, custom commands, sessions) is kept.
 const SETTINGS_KEYS = [
     // Appearance
-    "themeOverride", "accentCustom",
+    "themeOverride", "accentCustom", "accentOff", "uiLanguage",
     // Chat
     "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone", "autoIncludeAttachments", "askMode",
     // Display / layout
     "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
     "composerFontSize", "composerTextareaHeight",
     // Claude Code
-    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath", "fallbackModel", "subagentDetail",
+    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath", "fallbackModel", "subagentDetail", "perfMetrics", "defaultPermissionMode", "remoteControl",
     // Workspace
     "workingDirOverrides", "workingDirectory", "showCwdbar", "statusLineCommand",
     "displayName", "accountInfoSource",
     // Cost limits (localStorage cache; disk copy cleared via set-cost-limits)
     "costSessionLimit", "costDailyLimit", "costBlock", "maxBudgetUsd",
     // Composer selectors (incl. legacy effort key)
-    "effortLevel", "effortValue", "chatModel"
+    "effortLevel", "effortValue", "chatModel", "defaultModel"
 ];
 
 function resetSettingsToDefaults() {
-    if (!confirm("Reset all settings to defaults? This includes permission rules, cost limits and per-solution working directories. Prompt history and sessions are kept; the chat view will reload.")) return;
+    if (!confirm(t("settings.reset.confirm"))) return;
     for (const k of SETTINGS_KEYS) localStorage.removeItem(k);
     // Cost limits also live on disk (cost_limits.json) — clear them there too,
     // or the reload would just sync the old values straight back.
@@ -3715,7 +4300,7 @@ function resetSettingsToDefaults() {
 
 function showCostWarning(text, blocked) {
     const el = document.getElementById("cost-warning");
-    const prefix = blocked ? "Message blocked — " : "Cost limit reached — ";
+    const prefix = blocked ? t("cost.blocked") : t("cost.reached");
     document.getElementById("cost-warning-text").textContent = prefix + text;
     el.classList.toggle("blocked", !!blocked);
     el.style.display = "flex";
@@ -3727,7 +4312,7 @@ function showCostWarning(text, blocked) {
             last.classList.add("blocked");
             const badge = document.createElement("div");
             badge.className = "blocked-badge";
-            badge.textContent = "🚫 blocked by cost limit";
+            badge.textContent = t("cost.blockedBadge");
             last.appendChild(badge);
         }
     }
@@ -3789,8 +4374,8 @@ function appendTokens(text) {
     const fmt = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
     const el = document.createElement("div");
     el.className = "timing";
-    const cachePart = cacheRead > 0 ? ` · ↻ ${fmt(cacheRead)} cached` : "";
-    el.textContent = `tokens: ↑ ${fmt(inp)} in${cachePart} · ↓ ${fmt(out)} out`;
+    const cachePart = cacheRead > 0 ? t("tokens.cached", { n: fmt(cacheRead) }) : "";
+    el.textContent = t("tokens.line", { in: fmt(inp), cache: cachePart, out: fmt(out) });
     messages.appendChild(el);
     autoScroll();
 }
@@ -3841,15 +4426,15 @@ function applyMarkdown(bubble, raw) {
         const copyBtn = document.createElement("button");
         copyBtn.type = "button";
         copyBtn.className = "copy-btn";
-        copyBtn.textContent = "Copy";
-        copyBtn.title = "Copy this code block";
+        copyBtn.textContent = t("code.copy");
+        copyBtn.title = t("code.copyTitle");
         actions.appendChild(copyBtn);
 
         const applyBtn = document.createElement("button");
         applyBtn.type = "button";
         applyBtn.className = "apply-btn";
-        applyBtn.textContent = "Apply";
-        applyBtn.title = "Insert this code at the cursor in the active editor";
+        applyBtn.textContent = t("code.apply");
+        applyBtn.title = t("code.applyTitle");
         actions.appendChild(applyBtn);
 
         pre.appendChild(actions);
@@ -4052,6 +4637,120 @@ const gitBaselineCache = new Map();   // filePath → { content|null, error|null
 const pendingGitBaselineRequests = new Map(); // requestId → resolve()
 const PREVIEW_MAX_LINES = 30;
 
+// ── Files changed by a shell/subagent tool ──────────────────────────────────
+// The agent diffs git snapshots taken around Bash/PowerShell/Task calls and
+// sends the unified diff ("tool_files"). Each file becomes a row under the
+// tool chip; clicking it opens the same inline diff Edit/Write chips use.
+// Git C-quotes paths with special characters: "a/x\303\274 \"y\".txt" (octal
+// UTF-8 bytes, \" \\ \t \n). Unquoted input comes back as is.
+const GIT_PATH_ESCAPES = { n: 10, t: 9, r: 13, a: 7, b: 8, f: 12, v: 11 };
+function unquoteGitPath(s) {
+    if (s.length < 2 || !s.startsWith('"') || !s.endsWith('"')) return s;
+    const bytes = [];
+    const enc = new TextEncoder();
+    for (const m of s.slice(1, -1).matchAll(/\\([0-7]{3}|[\s\S])|[^\\]+/g)) {
+        if (m[1] === undefined) bytes.push(...enc.encode(m[0]));
+        else if (/^[0-7]{3}$/.test(m[1])) bytes.push(parseInt(m[1], 8));
+        else bytes.push(GIT_PATH_ESCAPES[m[1]] ?? m[1].charCodeAt(0));
+    }
+    return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+// The file's path from a part's header lines: "+++ b/…" (or "--- a/…" for a
+// deletion), "rename to …", else the "diff --git a/X b/X" line itself —
+// split by symmetry, since an unquoted X may itself contain " b/".
+function diffPartPath(headerLines) {
+    const strip = p => unquoteGitPath(p.replace(/\t$/, "")).replace(/^[ab]\//, "");
+    let minus = null;
+    for (const ln of headerLines) {
+        if (ln.startsWith("rename to ")) return unquoteGitPath(ln.slice(10));
+        if (ln.startsWith("+++ ") && ln !== "+++ /dev/null") return strip(ln.slice(4));
+        if (ln.startsWith("--- ") && ln !== "--- /dev/null") minus = strip(ln.slice(4));
+    }
+    if (minus !== null) return minus;
+    const rest = headerLines[0].slice("diff --git ".length);
+    if (rest.endsWith('"')) {
+        const tokens = [...rest.matchAll(/"(?:[^"\\]|\\.)*"|\S+/g)].map(m => m[0]);
+        return strip(tokens[tokens.length - 1]);
+    }
+    const half = (rest.length - 1) / 2;
+    if (Number.isInteger(half) && rest.slice(2, half) === rest.slice(half + 3)) return rest.slice(half + 3);
+    return strip(rest.slice(rest.lastIndexOf(" b/") + 1));
+}
+
+function parseUnifiedDiff(text) {
+    const files = [];
+    for (const part of text.split(/(?=^diff --git )/m)) {
+        if (!part.startsWith("diff --git ")) continue;
+        const lines = [];
+        const header = [];
+        let adds = 0, dels = 0, oldNum = 0, newNum = 0, inHunk = false, binary = false;
+        for (const ln of part.split("\n")) {
+            const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(ln);
+            if (hunk) {
+                if (inHunk) lines.push({ type: "gap" });
+                oldNum = +hunk[1]; newNum = +hunk[2]; inHunk = true;
+                continue;
+            }
+            if (!inHunk) { header.push(ln); if (ln.startsWith("Binary files ")) binary = true; continue; }
+            if (ln.startsWith("+")) { lines.push({ type: "+", line: ln.slice(1), newNum: newNum++ }); adds++; }
+            else if (ln.startsWith("-")) { lines.push({ type: "-", line: ln.slice(1), oldNum: oldNum++ }); dels++; }
+            else if (ln.startsWith(" ")) lines.push({ type: " ", line: ln.slice(1), oldNum: oldNum++, newNum: newNum++ });
+        }
+        files.push({ path: diffPartPath(header), adds, dels, binary, lines });
+    }
+    return files;
+}
+
+// tool_files "name" when the diff covers several tools that ran at once
+// (agent: ClaudeSession.ToolFilesParallel).
+const TOOL_FILES_PARALLEL = "parallel";
+
+function renderToolFiles(id, diffText, scope) {
+    const chip = id ? messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`) : null;
+    const files = parseUnifiedDiff(diffText);
+    if (!chip || files.length === 0) return;
+    chip.querySelector(".tool-files")?.remove();
+
+    const box = document.createElement("div");
+    box.className = "tool-files";
+    if (scope === TOOL_FILES_PARALLEL) {
+        const note = document.createElement("div");
+        note.className = "tool-files-note";
+        note.textContent = t("tool.parallelChanges");
+        box.appendChild(note);
+    }
+    for (const f of files) {
+        const row = document.createElement("div");
+        row.className = "tool-file-row";
+        row.innerHTML = '<span class="tool-file-caret">▸</span><span class="tool-file-path"></span>' +
+            (f.binary ? `<span class="tool-file-stat">${t("tool.binary")}</span>`
+                      : `<span class="tool-file-add">+${f.adds}</span><span class="tool-file-del">−${f.dels}</span>`);
+        row.querySelector(".tool-file-path").textContent = f.path;
+        row.addEventListener("click", e => {
+            e.stopPropagation(); // the chip itself toggles its own diff
+            const open = row.nextElementSibling;
+            if (open && open.classList.contains("tool-file-diff")) {
+                open.remove();
+                row.classList.remove("open");
+                return;
+            }
+            const body = document.createElement("div");
+            body.className = "tool-diff-body tool-file-diff";
+            const shown = f.lines.slice(0, PREVIEW_MAX_LINES * 4);
+            body.innerHTML = shown.length
+                ? renderDiffHtml(shown) + (f.lines.length > shown.length ? `<div class="diff-line diff-gap">${t("tool.moreLines", { n: f.lines.length - shown.length })}</div>` : "")
+                : `<div class="tool-diff-note">${t("tool.noTextChanges")}</div>`;
+            body.addEventListener("click", ev => ev.stopPropagation());
+            row.after(body);
+            row.classList.add("open");
+        });
+        box.appendChild(row);
+    }
+    chip.appendChild(box);
+    autoScroll();
+}
+
 function requestGitBaseline(filePath) {
     if (!filePath) return Promise.resolve({ content: null, error: "no path" });
     const cached = gitBaselineCache.get(filePath);
@@ -4201,7 +4900,7 @@ async function toggleToolDiff(chip) {
 
     const container = document.createElement("div");
     container.className = "tool-diff-inline";
-    container.innerHTML = '<div class="tool-diff-loading">computing diff…</div>';
+    container.innerHTML = `<div class="tool-diff-loading">${t("diff.computing")}</div>`;
     chip.appendChild(container);
     chip.classList.add("tool-chip-expanded");
 
@@ -4215,16 +4914,16 @@ async function toggleToolDiff(chip) {
         const preview = trimmed.slice(0, PREVIEW_MAX_LINES);
         const truncated = trimmed.length > PREVIEW_MAX_LINES;
         const noteHtml = (data.name === "Write" && hasBaseline === false)
-            ? '<div class="tool-diff-note">new file (no git baseline)</div>'
+            ? `<div class="tool-diff-note">${t("diff.newFileNoBaseline")}</div>`
             : "";
-        const vsBtnHtml = filePath ? `<button class="tool-diff-vs-btn">abrir no VS</button>` : "";
+        const vsBtnHtml = filePath ? `<button class="tool-diff-vs-btn">${t("diff.openInVsInline")}</button>` : "";
         container.innerHTML =
             noteHtml +
             `<div class="tool-diff-body">${renderDiffHtml(preview)}</div>` +
             `<div class="tool-diff-actions">
-                ${truncated ? `<span class="tool-diff-truncated">+${trimmed.length - PREVIEW_MAX_LINES} mais</span>` : ""}
+                ${truncated ? `<span class="tool-diff-truncated">${t("diff.more", { n: trimmed.length - PREVIEW_MAX_LINES })}</span>` : ""}
                 ${vsBtnHtml}
-                <button class="tool-diff-full-btn">ver completo</button>
+                <button class="tool-diff-full-btn">${t("diff.viewFull")}</button>
             </div>`;
         const btn = container.querySelector(".tool-diff-full-btn");
         btn.addEventListener("click", e => {
@@ -4258,12 +4957,12 @@ let toolDiffModalTool = "";
 
 function openDiffModal(filePath, diffLines, toolName, hasBaseline) {
     const overlay = document.getElementById("tool-diff-modal-overlay");
-    document.getElementById("diff-modal-path").textContent = filePath || "(no path)";
+    document.getElementById("diff-modal-path").textContent = filePath || t("diff.noPath");
     const subtitle = document.getElementById("diff-modal-subtitle");
     const added = diffLines.filter(l => l.type === "+").length;
     const removed = diffLines.filter(l => l.type === "-").length;
     let sub = `${toolName} • +${added} -${removed}`;
-    if (toolName === "Write" && hasBaseline === false) sub += " • new file";
+    if (toolName === "Write" && hasBaseline === false) sub += t("diff.newFile");
     subtitle.textContent = sub;
     document.getElementById("diff-modal-body").innerHTML = renderDiffHtml(diffLines);
     toolDiffModalFile = filePath || "";
@@ -4493,7 +5192,7 @@ function getOrCreateSubagentTrace(parentId, subagentType, taskDescription) {
     el.className = "subagent-trace";
     const header = document.createElement("div");
     header.className = "subagent-header";
-    header.textContent = "🤖 " + (subagentType || "subagent") + (taskDescription ? ": " + taskDescription : "");
+    header.textContent = "🤖 " + (subagentType || t("subagent.default")) + (taskDescription ? ": " + taskDescription : "");
     el.appendChild(header);
     parentChip.insertAdjacentElement("afterend", el);
 
@@ -4530,13 +5229,13 @@ function renderSubagentEvent(evt) {
     if (evt.type === "subagent-thinking" && evt.text) {
         const toggle = document.createElement("div");
         toggle.className = "subagent-thinking-toggle";
-        toggle.textContent = "✳ Thought ▸";
+        toggle.textContent = t("subagent.thought") + " ▸";
         const body = document.createElement("div");
         body.className = "subagent-thinking-body";
         body.textContent = evt.text;
         toggle.addEventListener("click", () => {
             const expanded = toggle.classList.toggle("expanded");
-            toggle.textContent = expanded ? "✳ Thought ▾" : "✳ Thought ▸";
+            toggle.textContent = t("subagent.thought") + (expanded ? " ▾" : " ▸");
         });
         entry.el.appendChild(toggle);
         entry.el.appendChild(body);
@@ -4604,7 +5303,7 @@ function renderTodoCard(bubble, inputJson) {
         return `<div class="todo-item todo-pending">○ ${escapeHtml(t.content || "")}</div>`;
     }).join("");
 
-    card.innerHTML = `<div class="todo-card-title">📝 Tasks <span class="todo-progress">${done}/${todos.length}</span></div>` +
+    card.innerHTML = `<div class="todo-card-title">${t("todo.title")} <span class="todo-progress">${done}/${todos.length}</span></div>` +
         `<div class="todo-list">${rows}</div>`;
 }
 
@@ -4746,7 +5445,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
         const otherInput = document.createElement("input");
         otherInput.type = "text";
         otherInput.className = "ask-question-other";
-        otherInput.placeholder = "Other — type your own answer…";
+        otherInput.placeholder = t("ask.otherPlaceholder");
         otherInput.oninput = () => {
             if (enableToggleCombine) {
                 // Keep the current selection; the write-in combines with it.
@@ -4787,7 +5486,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     const confirmBtn = document.createElement("button");
     confirmBtn.type = "button";
     confirmBtn.className = "q-btn q-yes ask-question-confirm";
-    confirmBtn.textContent = "Submit";
+    confirmBtn.textContent = t("ask.submit");
     confirmBtn.disabled = true;
     confirmBtn.onclick = submitAnswers;
     footer.appendChild(confirmBtn);
@@ -4796,7 +5495,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     // Pending picks dock above the composer so streaming can't scroll them
     // away; submitAnswers moves the card back into the bubble.
     pinCard(card, bubble, "turn");
-    renderPresence("waiting", "question");
+    renderPresence("waiting", t("presence.question"));
     updateConfirmState();
 
     function updateConfirmState() {
@@ -5022,9 +5721,8 @@ function clearChat() {
     // without this, a fresh chat right after would carry that model forward
     // instead of the one the user actually picked last. Bring the picker back
     // to the persisted default; the divider no-ops on this empty transcript.
-    const storedModel = localStorage.getItem("chatModel");
-    if (storedModel && modelSelect.value !== storedModel &&
-        [...modelSelect.options].some(o => o.value === storedModel)) {
+    const storedModel = startupModel();
+    if (storedModel && modelSelect.value !== storedModel) {
         modelSelect.value = storedModel;
         modelSelect.dispatchEvent(new Event("change"));
     }
@@ -5035,11 +5733,18 @@ function clearChat() {
     // outbound message even if the "Auto-resume" setting is on.
     _suppressNextAutoResume = true;
     permissionQueue = [];
+    _sendQueue.length = 0;
+    renderSendQueue();
 
+    resetContextRing();
+    clearRunningAgents();
+    remoteControlSessionEnded();
+    applyNewChatPermissionMode();
     window.chrome.webview.postMessage({ type: "clear" });
 }
 
 function renderBranchedMessages(newSessionId, msgs, sessionModel, lastTurnAt, contextTokens, cacheTtlMin) {
+    restoreSendQueue(); // queued for the old view's session — don't send them into this one
     if (welcome) { welcome.remove(); welcome = null; }
     messages.innerHTML = "";
     msgCounter = 0;
@@ -5108,7 +5813,7 @@ function renderBranchedMessages(newSessionId, msgs, sessionModel, lastTurnAt, co
             // Rebuild the "🗜️ Compacted: X → Y" divider from the JSONL
             // compact_boundary line — a divider, not a counted message, so it
             // doesn't touch ⎇/⟲ ordinals.
-            insertOrUpdateModelDivider(`🗜️ Compacted: ${fmtTokens(m.pre)} → ${fmtTokens(m.post)} tokens`);
+            insertOrUpdateModelDivider(t("compact.done", { pre: fmtTokens(m.pre), post: fmtTokens(m.post) }));
             hostBubble = null;
             hostSynthetic = false;
             todoBubble = null;
@@ -5331,7 +6036,7 @@ function addAttachment(filename, content, isBinary, filePath) {
     chip.className = "attachment-chip attachment-binary";
     chip.dataset.attId = id;
     const nameClass = filePath ? "attachment-name clickable" : "attachment-name";
-    chip.innerHTML = `<span class="${nameClass}" title="${filePath ? "Click to open" : ""}">${displayName}</span><button class="attachment-remove" title="Remove">×</button>`;
+    chip.innerHTML = `<span class="${nameClass}" title="${filePath ? t("file.clickToOpen") : ""}">${displayName}</span><button class="attachment-remove" title="${t("common.remove")}">×</button>`;
     if (filePath) {
         chip.querySelector(".attachment-name").addEventListener("click", () => {
             window.chrome.webview.postMessage({ type: "open-file", path: filePath });
@@ -5359,7 +6064,7 @@ function showNoWorkspaceCard(path) {
     const card = document.createElement("div");
     card.className = "question-card";
     card.innerHTML = `
-<div class="question-text">⚠️ <strong>No workspace open.</strong> Open a folder or solution first — Claude won't operate in your home directory (<code>${escapeHtml(path)}</code>).</div>`;
+<div class="question-text">⚠️ ${t("card.noWorkspace", { path: escapeHtml(path) })}</div>`;
     messages.appendChild(card);
     autoScroll();
 }
@@ -5378,12 +6083,12 @@ function showAuthRequiredCard(detail) {
     const card = document.createElement("div");
     card.className = "question-card auth-required-card";
     card.innerHTML = `
-<div class="question-text">🔑 <strong>${expired ? "Session expired." : "Not signed in."}</strong> ${expired
-        ? "Claude Code could not refresh your credentials — sign in again to continue this conversation."
-        : "Claude can't run without an account — sign in to continue."}</div>
+<div class="question-text">🔑 <strong>${expired ? t("card.sessionExpired") : t("card.notSignedIn")}</strong> ${expired
+        ? t("card.expiredBody")
+        : t("card.notSignedInBody")}</div>
 ${expired ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
 <div class="question-buttons">
-<button class="q-btn q-yes" onclick="startClaudeLogin(this.closest('.question-card'))">${expired ? "Sign in again" : "Sign in"}</button>
+<button class="q-btn q-yes" onclick="startClaudeLogin(this.closest('.question-card'))">${expired ? t("card.signInAgain") : t("card.signIn")}</button>
 </div>`;
     messages.appendChild(card);
     autoScroll();
@@ -5411,10 +6116,10 @@ function showClaudeNotFoundCard(detail) {
     const card = document.createElement("div");
     card.className = "question-card claude-not-found-card";
     card.innerHTML = `
-<div class="question-text">🧩 <strong>Claude Code not found.</strong> The agent couldn't find <code>claude.exe</code> on your PATH or any standard install location. Install it, then send your message again.</div>
-<div class="claude-install-hint">Documented method: <code>npm install -g @anthropic-ai/claude-code</code> (or choco / the native installer). You may need to restart VS so an updated PATH is picked up. Already installed somewhere custom? Point ⚙ → Claude Code → CLI path at it.</div>
+<div class="question-text">🧩 ${t("card.notFound")}</div>
+<div class="claude-install-hint">${t("card.notFoundHint")}</div>
 <div class="question-buttons">
-<button class="q-btn q-yes" onclick="startClaudeInstall(this.closest('.question-card'))">Install via npm</button>
+<button class="q-btn q-yes" onclick="startClaudeInstall(this.closest('.question-card'))">${t("card.installNpm")}</button>
 </div>`;
     messages.appendChild(card);
     autoScroll();
@@ -5440,10 +6145,10 @@ function showContextFullCard(detail) {
     const card = document.createElement("div");
     card.className = "question-card context-full-card";
     card.innerHTML = `
-<div class="question-text">🧠 <strong>This session is full.</strong> The conversation grew past the model's context window, so it can't be continued. Start a new session to keep going. Compacting won't help once the limit is hit; a new session is the way forward.</div>
+<div class="question-text">🧠 ${t("card.contextFull")}</div>
 ${detail && detail.trim() ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
 <div class="question-buttons">
-<button class="q-btn q-yes" onclick="startNewSessionFromCard(this.closest('.question-card'))">Start new session</button>
+<button class="q-btn q-yes" onclick="startNewSessionFromCard(this.closest('.question-card'))">${t("card.startNewSession")}</button>
 </div>`;
     messages.appendChild(card);
     autoScroll();
@@ -5467,11 +6172,11 @@ function showCreditsRequiredCard(detail) {
     const card = document.createElement("div");
     card.className = "question-card credits-required-card";
     card.innerHTML = `
-<div class="question-text">💳 <strong>This model needs usage credits.</strong> The selected model isn't included in your plan and requires paid usage credits to run. Pick another model to keep going, or add credits to your account.</div>
+<div class="question-text">💳 ${t("card.credits")}</div>
 ${detail && detail.trim() ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
 <div class="question-buttons">
-<button class="q-btn q-yes" onclick="chooseAnotherModelFromCard(this.closest('.question-card'))">Choose another model</button>
-<a class="q-btn" href="https://claude.ai/settings/usage" rel="noopener noreferrer">Manage credits</a>
+<button class="q-btn q-yes" onclick="chooseAnotherModelFromCard(this.closest('.question-card'))">${t("card.chooseModel")}</button>
+<a class="q-btn" href="https://claude.ai/settings/usage" rel="noopener noreferrer">${t("card.manageCredits")}</a>
 </div>`;
     messages.appendChild(card);
     autoScroll();
@@ -5502,10 +6207,10 @@ function showFileQuestion(id, displayName) {
     card.className = "question-card";
     card.id = `q-card-${id}`;
     card.innerHTML = `
-<div class="question-text">📎 <strong>${escapeHtml(displayName)}</strong> — Do you want Claude to read this file?</div>
+<div class="question-text">📎 <strong>${escapeHtml(displayName)}</strong> — ${t("file.question")}</div>
 <div class="question-buttons">
-<button class="q-btn q-yes" onclick="confirmFile(${id}, true)">Yes</button>
-<button class="q-btn q-no" onclick="confirmFile(${id}, false)">No</button>
+<button class="q-btn q-yes" onclick="confirmFile(${id}, true)">${t("common.yes")}</button>
+<button class="q-btn q-no" onclick="confirmFile(${id}, false)">${t("common.no")}</button>
 </div>`;
     messages.appendChild(card);
     autoScroll();
@@ -5517,7 +6222,7 @@ function confirmFile(id, include) {
 
     const card = document.getElementById(`q-card-${id}`);
     if (card) {
-        card.innerHTML = `<div class="question-text">📎 <strong>${escapeHtml(att?.displayName || "")}</strong> — ${include ? "✓ will be sent to Claude" : "✗ ignored"}</div>`;
+        card.innerHTML = `<div class="question-text">📎 <strong>${escapeHtml(att?.displayName || "")}</strong> — ${include ? t("file.willSend") : t("file.ignored")}</div>`;
         card.classList.add("question-answered");
     }
 
@@ -5549,9 +6254,9 @@ function renderHistory(sessions, scope, workspace) {
         if (historyScope === "workspace" && historyWorkspaceName) {
             footer.innerHTML = `📂 ${escapeHtml(historyWorkspaceName)}`;
         } else if (historyScope === "workspace") {
-            footer.innerHTML = `📂 workspace`;
+            footer.innerHTML = escapeHtml(t("history.footerWorkspace"));
         } else {
-            footer.innerHTML = `🌐 all projects`;
+            footer.innerHTML = escapeHtml(t("history.footerAll"));
         }
     }
 
@@ -5564,19 +6269,19 @@ function renderHistoryList(sessions, query) {
     if (countEl) countEl.textContent = (sessions && sessions.length) ? String(sessions.length) : "";
     if (!sessions || sessions.length === 0) {
         if (query) {
-            list.innerHTML = `<div class="cmd-item" style="color:#555;font-family:inherit">No matches for "${escapeHtml(query)}"</div>`;
+            list.innerHTML = `<div class="cmd-item" style="color:#555;font-family:inherit">${t("history.noMatches", { query: escapeHtml(query) })}</div>`;
         } else if (historyScope === "workspace") {
-            list.innerHTML = `<div class="cmd-item history-empty">No sessions in this workspace · <a href="#" onclick="event.preventDefault();document.getElementById('history-show-all').checked=true;onShowAllToggle();">see all projects</a></div>`;
+            list.innerHTML = `<div class="cmd-item history-empty">${t("history.noSessionsWorkspace")}<a href="#" onclick="event.preventDefault();document.getElementById('history-show-all').checked=true;onShowAllToggle();">${t("history.seeAll")}</a></div>`;
         } else {
-            list.innerHTML = '<div class="cmd-item" style="color:#555;font-family:inherit">No sessions found</div>';
+            list.innerHTML = `<div class="cmd-item" style="color:#555;font-family:inherit">${t("history.noSessions")}</div>`;
         }
         return;
     }
     list.innerHTML = sessions.map(s => {
         const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
-        const msgs = (s.messages != null) ? `${s.messages} msg${s.messages === 1 ? "" : "s"} · ` : "";
+        const msgs = (s.messages != null) ? t("history.msgs", { n: s.messages, s: s.messages === 1 ? "" : "s" }) : "";
         const model = s.model
-            ? `<span title="Last model used: ${escapeAttr(s.model)}">${escapeHtml(historyModelLabel(s.model))}</span> · `
+            ? `<span title="${t("history.lastModel", { model: escapeAttr(s.model) })}">${escapeHtml(historyModelLabel(s.model))}</span> · `
             : "";
         // Generated/custom title (V18) leads when present; the raw preview
         // stays reachable via tooltip.
@@ -5585,10 +6290,10 @@ function renderHistoryList(sessions, query) {
         return `<div class="cmd-item history-item" data-session-id="${escapeAttr(s.id)}">
   <div class="history-header">
     <div class="history-preview"${tooltip} onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(label)}</div>
-    <button class="history-action" onclick="startRenameSession('${escapeAttr(s.id)}')" title="Rename">✎</button>
-    <button class="history-action" onclick="forkSession('${escapeAttr(s.id)}')" title="Resume as fork (new session, original untouched)">↳</button>
-    <button class="history-action" onclick="viewSession('${escapeAttr(s.id)}')" title="Open transcript in editor">⤢</button>
-    <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
+    <button class="history-action" onclick="startRenameSession('${escapeAttr(s.id)}')" title="${t("history.rename")}">✎</button>
+    <button class="history-action" onclick="forkSession('${escapeAttr(s.id)}')" title="${t("history.fork")}">↳</button>
+    <button class="history-action" onclick="viewSession('${escapeAttr(s.id)}')" title="${t("history.view")}">⤢</button>
+    <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="${t("history.delete")}">×</button>
   </div>
   <div class="history-date">${escapeHtml(s.date)} · ${model}${msgs}${tok}</div>
 </div>`;
@@ -5668,7 +6373,7 @@ function showResumeOverlay() {
         ov = document.createElement("div");
         ov.id = "resume-overlay";
         ov.className = "resume-overlay";
-        ov.innerHTML = `<div class="resume-overlay-inner"><span class="dots"><span>.</span><span>.</span><span>.</span></span><span>Loading session…</span></div>`;
+        ov.innerHTML = `<div class="resume-overlay-inner"><span class="dots"><span>.</span><span>.</span><span>.</span></span><span>${t("history.loadingSession")}</span></div>`;
         document.body.appendChild(ov);
     }
     ov.classList.add("visible");
@@ -5689,7 +6394,7 @@ function escapeHtml(text) {
 }
 
 function deleteSession(sessionId) {
-    if (!confirm("Delete this session? This cannot be undone.")) return;
+    if (!confirm(t("history.confirmDelete"))) return;
     window.chrome.webview.postMessage({ type: "delete-session", sessionId });
 }
 
@@ -5823,7 +6528,7 @@ document.getElementById("find-input").addEventListener("keydown", e => {
 function openDiffModal() {
     document.getElementById("diff-modal-overlay").classList.add("open");
     document.getElementById("diff-stat").textContent = "";
-    document.getElementById("diff-body").innerHTML = '<span class="usage-loading">Running git diff…</span>';
+    document.getElementById("diff-body").innerHTML = `<span class="usage-loading">${t("diff.running")}</span>`;
     window.chrome.webview.postMessage({
         type: "get-diff",
         autoSave: autoSaveValues[+autoSaveSlider.value]
@@ -5906,7 +6611,7 @@ function paintDiffBody() {
             msg.textContent = _diffRawText;
             body.appendChild(msg);
         } else if (!_diffStat) {
-            body.textContent = "No changes.";
+            body.textContent = t("diff.noChanges");
         }
         return;
     }
@@ -5928,3 +6633,199 @@ function paintDiffBody() {
 }
 
 renderCustomCommands();
+// ── Plugins panel (/plugin) ───────────────────────────────────
+// Installed plugins, the marketplaces' catalog and the marketplaces themselves,
+// all read and changed through `claude plugin …` on the host. One action at a time.
+const PluginMsg = { List: "plugins-list", Action: "plugin-action", Data: "plugins-data", Result: "plugins-result" };
+const PluginAction = {
+    Install: "Install", Uninstall: "Uninstall", Enable: "Enable", Disable: "Disable", Update: "Update",
+    MarketplaceAdd: "MarketplaceAdd", MarketplaceRemove: "MarketplaceRemove", MarketplaceUpdate: "MarketplaceUpdate"
+};
+const PluginsTab = { Installed: "installed", Discover: "discover", Marketplaces: "marketplaces" };
+const PLUGIN_SCOPES = ["user", "project", "local"];   // what the host's PluginScope enum accepts
+const PLUGINS_MAX_ROWS = 200;                          // the catalog has thousands; search narrows it
+
+let _plugins = null;          // { installed, available, marketplaces } from the host
+let _pluginsTab = PluginsTab.Installed;
+let _pluginsBusy = null;      // target of the action in flight
+let _pluginsStatusIsLoading = false;   // status line shows "Loading…" (cleared when data lands)
+
+function openPluginsModal() {
+    document.getElementById("plugins-modal-overlay").classList.add("open");
+    setPluginsTab(_pluginsTab);
+    requestPlugins();
+}
+
+function closePluginsModal() {
+    document.getElementById("plugins-modal-overlay").classList.remove("open");
+}
+
+// keepStatus: refresh behind an action's "Done…" line instead of replacing it.
+function requestPlugins(keepStatus) {
+    if (!keepStatus) {
+        setPluginsStatus(t("common.loading"));
+        _pluginsStatusIsLoading = true;
+    }
+    window.chrome.webview.postMessage({ type: PluginMsg.List });
+}
+
+function setPluginsStatus(text, isError) {
+    _pluginsStatusIsLoading = false;
+    const el = document.getElementById("plugins-status");
+    el.textContent = text || "";
+    el.classList.toggle("error", !!isError);
+}
+
+function setPluginsTab(tab) {
+    _pluginsTab = tab;
+    document.querySelectorAll("#plugins-tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+    document.getElementById("plugins-bar-mkt").hidden = tab !== PluginsTab.Marketplaces;
+    document.getElementById("plugins-bar-search").hidden = tab === PluginsTab.Marketplaces;
+    document.getElementById("plugins-scope").hidden = tab !== PluginsTab.Discover;
+    renderPlugins();
+}
+
+function onPluginsData(d) {
+    if (d.error || !d.catalog) { setPluginsStatus(t("plugins.loadFailed", { error: d.error || "" }), true); return; }
+    _plugins = d.catalog;
+    if (_pluginsStatusIsLoading) setPluginsStatus("");
+    renderPlugins();
+}
+
+function pluginAction(action, target, scope) {
+    if (_pluginsBusy !== null) return;
+    _pluginsBusy = target;
+    setPluginsStatus(t("plugins.running", { target: target || action }));
+    window.chrome.webview.postMessage({
+        type: PluginMsg.Action, pluginAction: action, pluginTarget: target,
+        pluginScope: PLUGIN_SCOPES.includes(scope) ? scope : null
+    });
+    renderPlugins();
+}
+
+function onPluginsResult(d) {
+    _pluginsBusy = null;
+    if (d.ok) {
+        setPluginsStatus(t("plugins.done", { target: d.target || d.action }));
+        requestPlugins(true);
+    } else {
+        setPluginsStatus(t("plugins.failed", { error: d.error || "" }), true);
+    }
+    renderPlugins();
+}
+
+function addPluginMarketplace() {
+    const input = document.getElementById("plugins-mkt-source");
+    const source = input.value.trim();
+    if (!source) return;
+    input.value = "";
+    pluginAction(PluginAction.MarketplaceAdd, source);
+}
+
+function confirmPluginAction(action, target, scope, question) {
+    if (confirm(question)) pluginAction(action, target, scope);
+}
+
+function pluginsRow(title, chips, desc, buttons) {
+    const row = document.createElement("div");
+    row.className = "plugins-row";
+    const body = document.createElement("div");
+    body.className = "plugins-row-body";
+    const head = document.createElement("div");
+    head.className = "plugins-row-head";
+    const name = document.createElement("span");
+    name.className = "plugins-row-name";
+    name.textContent = title;
+    head.appendChild(name);
+    for (const c of chips) {
+        if (!c) continue;
+        const chip = document.createElement("span");
+        chip.className = "plugins-chip";
+        chip.textContent = c;
+        head.appendChild(chip);
+    }
+    body.appendChild(head);
+    if (desc) {
+        const d = document.createElement("div");
+        d.className = "plugins-row-desc";
+        d.textContent = desc;
+        d.title = desc;
+        body.appendChild(d);
+    }
+    row.appendChild(body);
+    const actions = document.createElement("div");
+    actions.className = "plugins-row-actions";
+    for (const b of buttons) {
+        const btn = document.createElement("button");
+        btn.className = "plugins-btn" + (b.danger ? " danger" : "");
+        btn.textContent = b.label;
+        btn.disabled = _pluginsBusy !== null || !!b.disabled;
+        btn.onclick = b.run;
+        actions.appendChild(btn);
+    }
+    row.appendChild(actions);
+    return row;
+}
+
+function renderPlugins() {
+    const list = document.getElementById("plugins-list");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!_plugins) return;
+    const q = document.getElementById("plugins-search").value.trim().toLowerCase();
+    const matches = (...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q));
+    const empty = key => {
+        const el = document.createElement("div");
+        el.className = "plugins-empty";
+        el.textContent = t(key);
+        list.appendChild(el);
+    };
+
+    if (_pluginsTab === PluginsTab.Installed) {
+        const rows = _plugins.installed.filter(p => matches(p.id));
+        if (!rows.length) return empty(_plugins.installed.length ? "plugins.noMatch" : "plugins.noneInstalled");
+        for (const p of rows) {
+            list.appendChild(pluginsRow(p.id, [p.version && "v" + p.version, p.scope, p.enabled ? null : t("plugins.disabled")], "", [
+                p.enabled
+                    ? { label: t("plugins.disable"), run: () => pluginAction(PluginAction.Disable, p.id, p.scope) }
+                    : { label: t("plugins.enable"), run: () => pluginAction(PluginAction.Enable, p.id, p.scope) },
+                { label: t("plugins.update"), run: () => pluginAction(PluginAction.Update, p.id, p.scope) },
+                { label: t("plugins.uninstall"), danger: true,
+                  run: () => confirmPluginAction(PluginAction.Uninstall, p.id, p.scope, t("plugins.confirmUninstall", { target: p.id })) }
+            ]));
+        }
+        return;
+    }
+
+    if (_pluginsTab === PluginsTab.Discover) {
+        const installed = new Set(_plugins.installed.map(p => p.id));
+        const all = _plugins.available
+            .filter(p => matches(p.name, p.description, p.marketplace))
+            .sort((a, b) => (b.installs || 0) - (a.installs || 0));
+        if (!all.length) return empty(_plugins.available.length ? "plugins.noMatch" : "plugins.noneAvailable");
+        const scopeSelect = document.getElementById("plugins-scope");
+        for (const p of all.slice(0, PLUGINS_MAX_ROWS)) {
+            const isInstalled = installed.has(p.id);
+            list.appendChild(pluginsRow(p.name, [p.marketplace, p.installs ? t("plugins.installs", { n: p.installs.toLocaleString() }) : null], p.description, [
+                { label: isInstalled ? t("plugins.installed") : t("plugins.install"), disabled: isInstalled,
+                  run: () => pluginAction(PluginAction.Install, p.id, scopeSelect.value) }
+            ]));
+        }
+        if (all.length > PLUGINS_MAX_ROWS) {
+            const more = document.createElement("div");
+            more.className = "plugins-empty";
+            more.textContent = t("plugins.more", { shown: PLUGINS_MAX_ROWS, total: all.length });
+            list.appendChild(more);
+        }
+        return;
+    }
+
+    if (!_plugins.marketplaces.length) return empty("plugins.noMarketplaces");
+    for (const m of _plugins.marketplaces) {
+        list.appendChild(pluginsRow(m.name, [], m.source, [
+            { label: t("plugins.update"), run: () => pluginAction(PluginAction.MarketplaceUpdate, m.name) },
+            { label: t("plugins.remove"), danger: true,
+              run: () => confirmPluginAction(PluginAction.MarketplaceRemove, m.name, null, t("plugins.confirmRemoveMkt", { target: m.name })) }
+        ]));
+    }
+}

@@ -51,9 +51,9 @@ public class CostLimits
     {
         var msgs = new System.Collections.Generic.List<string>();
         if (SessionLimit is decimal sl && sl > 0m && sessionCost >= sl)
-            msgs.Add($"session ${sessionCost:F2} / ${sl:F2}");
+            msgs.Add(Localization.Strings.Format("cost.session", sessionCost, sl));
         if (DailyLimit is decimal dl && dl > 0m && dailyCost >= dl)
-            msgs.Add($"today ${dailyCost:F2} / ${dl:F2}");
+            msgs.Add(Localization.Strings.Format("cost.today", dailyCost, dl));
         return msgs.Count == 0 ? null : string.Join(" · ", msgs);
     }
 

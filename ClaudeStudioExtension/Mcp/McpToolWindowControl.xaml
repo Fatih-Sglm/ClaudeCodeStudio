@@ -1,6 +1,7 @@
 <UserControl x:Class="ClaudeStudioExtension.Mcp.McpToolWindowControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="clr-namespace:ClaudeStudioExtension.Localization"
              Background="#1f1f1f"
              Foreground="#f4f4f4"
              TextOptions.TextFormattingMode="Display">
@@ -340,14 +341,14 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <Button x:Name="TabProject" Content="Project" Style="{StaticResource TabButtonActive}" Click="OnTabProjectClick"/>
-                    <Button x:Name="TabUser" Content="User" Style="{StaticResource TabButton}" Click="OnTabUserClick"/>
+                    <Button x:Name="TabProject" Content="{l:Loc mcp.tab.project}" Style="{StaticResource TabButtonActive}" Click="OnTabProjectClick"/>
+                    <Button x:Name="TabUser" Content="{l:Loc mcp.tab.user}" Style="{StaticResource TabButton}" Click="OnTabUserClick"/>
                     <StackPanel Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
-                        <Button Content="Refresh" Click="OnRefreshClick" Margin="0,0,8,0"/>
-                        <Button x:Name="BtnAdd" Content="+ Add server" Click="OnAddClick" Style="{StaticResource PrimaryButton}"/>
+                        <Button Content="{l:Loc mcp.refresh}" Click="OnRefreshClick" Margin="0,0,8,0"/>
+                        <Button x:Name="BtnAdd" Content="{l:Loc mcp.addServer}" Click="OnAddClick" Style="{StaticResource PrimaryButton}"/>
                     </StackPanel>
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="experimental"
+                <TextBlock Grid.Column="2" Text="{l:Loc mcp.experimental}"
                            Foreground="{DynamicResource mutedBrush}" FontSize="9"
                            Typography.Capitals="AllSmallCaps"
                            VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -383,16 +384,16 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="EditTitle" Grid.Column="0" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <ToggleButton x:Name="DisableSwitch" Grid.Column="1" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center" ToolTip="Toggle enabled / disabled"/>
+                            <ToggleButton x:Name="DisableSwitch" Grid.Column="1" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center" ToolTip="{l:Loc mcp.toggleEnabled}"/>
                         </Grid>
 
-                        <TextBlock Text="Template" Style="{StaticResource LabelStyle}"/>
+                        <TextBlock Text="{l:Loc mcp.template}" Style="{StaticResource LabelStyle}"/>
                         <ComboBox x:Name="TemplateCombo" SelectionChanged="OnTemplateChanged"/>
 
-                        <TextBlock Text="Name" Style="{StaticResource LabelStyle}"/>
+                        <TextBlock Text="{l:Loc mcp.name}" Style="{StaticResource LabelStyle}"/>
                         <TextBox x:Name="NameBox"/>
 
-                        <TextBlock Text="Transport" Style="{StaticResource LabelStyle}"/>
+                        <TextBlock Text="{l:Loc mcp.transport}" Style="{StaticResource LabelStyle}"/>
                         <StackPanel Orientation="Horizontal">
                             <RadioButton x:Name="RbStdio" Content="stdio" GroupName="Transport" IsChecked="True" Checked="OnTransportChanged"/>
                             <RadioButton x:Name="RbHttp" Content="http" GroupName="Transport" Checked="OnTransportChanged"/>
@@ -400,27 +401,27 @@
                         </StackPanel>
 
                         <StackPanel x:Name="StdioPanel">
-                            <TextBlock Text="Command" Style="{StaticResource LabelStyle}"/>
+                            <TextBlock Text="{l:Loc mcp.command}" Style="{StaticResource LabelStyle}"/>
                             <TextBox x:Name="CommandBox"/>
-                            <TextBlock Text="Args (one per line)" Style="{StaticResource LabelStyle}"/>
+                            <TextBlock Text="{l:Loc mcp.args}" Style="{StaticResource LabelStyle}"/>
                             <TextBox x:Name="ArgsBox" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="60" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Code, Consolas, monospace"/>
-                            <TextBlock Text="Environment variables" Style="{StaticResource LabelStyle}"/>
+                            <TextBlock Text="{l:Loc mcp.env}" Style="{StaticResource LabelStyle}"/>
                             <StackPanel x:Name="EnvList"/>
-                            <Button Content="+ Add env" Click="OnAddEnvClick" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+                            <Button Content="{l:Loc mcp.addEnv}" Click="OnAddEnvClick" HorizontalAlignment="Left" Margin="0,6,0,0"/>
                         </StackPanel>
 
                         <StackPanel x:Name="HttpPanel" Visibility="Collapsed">
-                            <TextBlock Text="URL" Style="{StaticResource LabelStyle}"/>
+                            <TextBlock Text="{l:Loc mcp.url}" Style="{StaticResource LabelStyle}"/>
                             <TextBox x:Name="UrlBox"/>
-                            <TextBlock Text="Headers" Style="{StaticResource LabelStyle}"/>
+                            <TextBlock Text="{l:Loc mcp.headers}" Style="{StaticResource LabelStyle}"/>
                             <StackPanel x:Name="HeadersList"/>
-                            <Button Content="+ Add header" Click="OnAddHeaderClick" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+                            <Button Content="{l:Loc mcp.addHeader}" Click="OnAddHeaderClick" HorizontalAlignment="Left" Margin="0,6,0,0"/>
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
-                            <Button Content="Cancel" Click="OnCancelEditClick" Margin="0,0,6,0"/>
-                            <Button x:Name="BtnDelete" Content="Delete" Click="OnDeleteClick" Style="{StaticResource DangerButton}" Margin="0,0,6,0" Visibility="Collapsed"/>
-                            <Button Content="Save" Click="OnSaveClick" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="{l:Loc mcp.cancel}" Click="OnCancelEditClick" Margin="0,0,6,0"/>
+                            <Button x:Name="BtnDelete" Content="{l:Loc mcp.delete}" Click="OnDeleteClick" Style="{StaticResource DangerButton}" Margin="0,0,6,0" Visibility="Collapsed"/>
+                            <Button Content="{l:Loc mcp.save}" Click="OnSaveClick" Style="{StaticResource PrimaryButton}"/>
                         </StackPanel>
 
                         <TextBlock x:Name="ErrorLabel" Foreground="{DynamicResource dangerBrush}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>

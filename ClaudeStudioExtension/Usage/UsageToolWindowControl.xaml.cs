@@ -8,8 +8,10 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Markup;
 using System.Windows.Media;
 using ClaudeStudioShared;
+using ClaudeStudioExtension.Localization;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.PlatformUI;
@@ -30,12 +32,15 @@ public partial class UsageToolWindowControl : UserControl
     // Whether the plan-limit bars currently show data (from cache or a live run).
     // A failed refresh keeps them instead of blanking to an error.
     private bool _haveLimits;
+    private (int pct, string reset)? _sessionLimit, _weekLimit;
+    private string? _limitsStatusKey;
 
     public UsageToolWindowControl()
     {
         InitializeComponent();
 
         ApplyTheme();
+        ApplyLanguage();
         Theming.NativeTheme.Changed += OnThemeChanged;
         Unloaded += (_, _) => Theming.NativeTheme.Changed -= OnThemeChanged;
 
@@ -64,7 +69,19 @@ public partial class UsageToolWindowControl : UserControl
     // override (auto/dark/light + custom accent) or the live VS theme and swaps the
     // DynamicResource brush entries in place. NativeTheme.Changed fires for both a
     // VS theme switch and an appearance-setting change from the chat.
-    private void OnThemeChanged() => Dispatcher.Invoke(ApplyTheme);
+    private void OnThemeChanged() => Dispatcher.Invoke(() =>
+    {
+        ApplyTheme();
+        ApplyLanguage();
+        ApplyFilters();
+        ApplyLimit(_sessionLimit, SessionLimitRow, SessionPctText, SessionResetText, SessionFillCol, SessionRestCol);
+        ApplyLimit(_weekLimit, WeekLimitRow, WeekPctText, WeekResetText, WeekFillCol, WeekRestCol);
+        if (_limitsStatusKey != null) LimitsStatusText.Text = Strings.Get(_limitsStatusKey);
+    });
+
+    // Bindings (table StringFormat) format with the element's Language; code-built
+    // texts use Strings.Culture, so cards and table share one culture.
+    private void ApplyLanguage() => Language = XmlLanguage.GetLanguage(Strings.Culture.IetfLanguageTag);
 
     private void ApplyTheme()
     {
@@ -115,17 +132,28 @@ public partial class UsageToolWindowControl : UserControl
         ApplyFilters();
     }
 
-    public void Refresh()
+    // Callers stay fire-and-forget; reading the transcripts happens off the UI
+    // thread (it froze VS on open and after every chat turn).
+    public void Refresh() => _ = RefreshAsync();
+
+    // Overlapping refreshes (open + visible + end of turn): only the newest applies.
+    private int _refreshGen;
+
+    private async Task RefreshAsync()
     {
+        var gen = ++_refreshGen;
         try
         {
-            CaptureCurrentCwd();
-            _all = UsageReader.ReadAll();
+            CaptureCurrentCwd(); // DTE: UI thread
+            var all = await Task.Run(() => UsageReader.ReadAll());
+            if (gen != _refreshGen) return;
+            _all = all;
             ApplyFilters();
         }
         catch (Exception ex)
         {
-            TotalCostText.Text = "error";
+            if (gen != _refreshGen) return;
+            TotalCostText.Text = Strings.Get("usage.error");
             SessionCountText.Text = ex.Message;
         }
     }
@@ -142,11 +170,11 @@ public partial class UsageToolWindowControl : UserControl
         // full "Loading…" placeholder on the first run with nothing cached.
         if (_haveLimits)
         {
-            if (LimitsStatusText != null) { LimitsStatusText.Text = "Updating…"; LimitsStatusText.Visibility = Visibility.Visible; }
+            if (LimitsStatusText != null) { _limitsStatusKey = "usage.updating"; LimitsStatusText.Text = Strings.Get(_limitsStatusKey); LimitsStatusText.Visibility = Visibility.Visible; }
         }
         else
         {
-            ShowLimitsStatus("Loading…");
+            ShowLimitsStatus("usage.loading");
         }
 
         string output;
@@ -156,13 +184,13 @@ public partial class UsageToolWindowControl : UserControl
         }
         catch (ClaudeNotFoundException)
         {
-            FinishLimitsRefresh("Claude CLI not found.");
+            FinishLimitsRefresh("usage.cliNotFound");
             return;
         }
         catch (Exception ex)
         {
             OutputLog.Info($"plan limits failed: {ex.GetType().Name}: {ex.Message}");
-            FinishLimitsRefresh("Could not read plan limits.");
+            FinishLimitsRefresh("usage.limitsFailed");
             return;
         }
         finally
@@ -174,14 +202,11 @@ public partial class UsageToolWindowControl : UserControl
         var week = ParseLimit(output, @"Current week[^:]*:\s*(\d+)% used[^\n]*?resets\s+([^\n]+)");
         if (session == null && week == null)
         {
-            FinishLimitsRefresh("Could not read plan limits.");
+            FinishLimitsRefresh("usage.limitsFailed");
             return;
         }
 
-        if (LimitsStatusText != null) LimitsStatusText.Visibility = Visibility.Collapsed;
-        ApplyLimit(session, SessionLimitRow, SessionPctText, SessionResetText, SessionFillCol, SessionRestCol);
-        ApplyLimit(week, WeekLimitRow, WeekPctText, WeekResetText, WeekFillCol, WeekRestCol);
-        _haveLimits = true;
+        ShowLimits(session, week);
         new PlanLimitsCache
         {
             SessionPct = session?.pct, SessionReset = session?.reset,
@@ -192,15 +217,16 @@ public partial class UsageToolWindowControl : UserControl
 
     // A failed refresh keeps already-shown bars (just hides the "Updating…" hint);
     // the error text only appears when there is nothing cached to show.
-    private void FinishLimitsRefresh(string errorIfEmpty)
+    private void FinishLimitsRefresh(string errorKeyIfEmpty)
     {
         if (_haveLimits)
         {
+            _limitsStatusKey = null;
             if (LimitsStatusText != null) LimitsStatusText.Visibility = Visibility.Collapsed;
         }
         else
         {
-            ShowLimitsStatus(errorIfEmpty);
+            ShowLimitsStatus(errorKeyIfEmpty);
         }
     }
 
@@ -212,6 +238,14 @@ public partial class UsageToolWindowControl : UserControl
         var session = c.SessionPct is int sp ? ((int pct, string reset)?)(sp, c.SessionReset ?? "") : null;
         var week = c.WeekPct is int wp ? ((int pct, string reset)?)(wp, c.WeekReset ?? "") : null;
         if (session == null && week == null) return;
+        ShowLimits(session, week);
+    }
+
+    private void ShowLimits((int pct, string reset)? session, (int pct, string reset)? week)
+    {
+        _sessionLimit = session;
+        _weekLimit = week;
+        _limitsStatusKey = null;
         if (LimitsStatusText != null) LimitsStatusText.Visibility = Visibility.Collapsed;
         ApplyLimit(session, SessionLimitRow, SessionPctText, SessionResetText, SessionFillCol, SessionRestCol);
         ApplyLimit(week, WeekLimitRow, WeekPctText, WeekResetText, WeekFillCol, WeekRestCol);
@@ -220,9 +254,10 @@ public partial class UsageToolWindowControl : UserControl
 
     private void OnRefreshLimitsClick(object sender, RoutedEventArgs e) => _ = LoadPlanLimitsAsync();
 
-    private void ShowLimitsStatus(string text)
+    private void ShowLimitsStatus(string key)
     {
-        if (LimitsStatusText != null) { LimitsStatusText.Text = text; LimitsStatusText.Visibility = Visibility.Visible; }
+        _limitsStatusKey = key;
+        if (LimitsStatusText != null) { LimitsStatusText.Text = Strings.Get(key); LimitsStatusText.Visibility = Visibility.Visible; }
         if (SessionLimitRow != null) SessionLimitRow.Visibility = Visibility.Collapsed;
         if (WeekLimitRow != null) WeekLimitRow.Visibility = Visibility.Collapsed;
     }
@@ -278,7 +313,7 @@ public partial class UsageToolWindowControl : UserControl
         if (data == null) { row.Visibility = Visibility.Collapsed; return; }
         var pct = Math.Max(0, Math.Min(100, data.Value.pct));
         pctText.Text = data.Value.pct + "%";
-        resetText.Text = "resets " + data.Value.reset;
+        resetText.Text = Strings.Format("usage.resets", data.Value.reset);
         fillCol.Width = new GridLength(pct, GridUnitType.Star);
         restCol.Width = new GridLength(100 - pct, GridUnitType.Star);
         row.Visibility = Visibility.Visible;
@@ -364,11 +399,12 @@ public partial class UsageToolWindowControl : UserControl
         var totalOut   = list.Sum(r => r.OutputTokens);
         var totalCache = list.Sum(r => r.CacheReadTokens + r.CacheCreationTokens);
 
-        TotalCostText.Text     = $"${totalCost:F2}";
-        TotalInText.Text       = totalIn.ToString("N0");
-        TotalOutText.Text      = totalOut.ToString("N0");
-        TotalCacheText.Text    = totalCache.ToString("N0");
-        SessionCountText.Text  = list.Count.ToString();
+        var culture = Strings.Culture;
+        TotalCostText.Text     = string.Format(culture, "${0:F2}", totalCost);
+        TotalInText.Text       = totalIn.ToString("N0", culture);
+        TotalOutText.Text      = totalOut.ToString("N0", culture);
+        TotalCacheText.Text    = totalCache.ToString("N0", culture);
+        SessionCountText.Text  = list.Count.ToString(culture);
     }
 
     /// <summary>
@@ -386,13 +422,13 @@ public partial class UsageToolWindowControl : UserControl
         try
         {
             SessionCombo.Items.Clear();
-            SessionCombo.Items.Add(new ComboBoxItem { Content = "All sessions" });
+            SessionCombo.Items.Add(new ComboBoxItem { Content = Strings.Get("usage.allSessions") });
 
             foreach (var s in scope)
             {
                 var item = new ComboBoxItem
                 {
-                    Content = $"{ResolveSessionLabel(s)} · {s.LastTimestamp:dd/MM HH:mm}",
+                    Content = $"{ResolveSessionLabel(s)} · {s.LastTimestamp.ToString("dd/MM HH:mm", Strings.Culture)}",
                     Tag = s.SessionId,
                     ToolTip = s.SessionId,
                 };
@@ -416,7 +452,7 @@ public partial class UsageToolWindowControl : UserControl
                 ? s.NativeCustomTitle : null)
             ?? SessionTitlesStore.GetGenerated(s.SessionId)
             ?? (s.NativeAiTitle.Length > 0 ? s.NativeAiTitle : null)
-            ?? (s.Preview.Length > 0 ? s.Preview : "(untitled)");
+            ?? (s.Preview.Length > 0 ? s.Preview : Strings.Get("usage.untitled"));
         return title.Length > 46 ? title.Substring(0, 46) + "…" : title;
     }
 
@@ -436,7 +472,7 @@ public partial class UsageToolWindowControl : UserControl
         public SessionRow(SessionUsage s)
         {
             LastTimestamp = s.LastTimestamp;
-            ProjectName = string.IsNullOrEmpty(s.Cwd) ? "(unknown)" : Path.GetFileName(s.Cwd.TrimEnd('\\', '/'));
+            ProjectName = string.IsNullOrEmpty(s.Cwd) ? Strings.Get("usage.unknownProject") : Path.GetFileName(s.Cwd.TrimEnd('\\', '/'));
             ShortModel = ShortenModel(s.Model);
             InputTokens = s.InputTokens;
             OutputTokens = s.OutputTokens;

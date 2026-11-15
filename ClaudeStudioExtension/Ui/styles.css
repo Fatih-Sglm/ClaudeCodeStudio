@@ -441,7 +441,7 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .unit-btn.active {
     background: var(--accent);
-    color: white;
+    color: var(--on-accent, #fff);
 }
 
 .effort-row { margin-bottom: 2px; }
@@ -652,7 +652,7 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 .cmd-modal-buttons .btn-primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: white;
+    color: var(--on-accent, #fff);
 }
 
 .cmd-modal-buttons .btn-primary:hover { background: #c4734f; }
@@ -1799,6 +1799,33 @@ body.splitter-dragging * {
     border-style: dashed;
 }
 
+/* Messages sent while a turn runs: dimmed until their own turn starts. */
+.send-queue {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.send-queue-item {
+    opacity: 0.6;
+    border-style: dashed;
+}
+
+.send-queue-label {
+    flex-shrink: 0;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+}
+
+.send-queue-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .input {
     position: relative;
     background: #2a2a2a;
@@ -1867,9 +1894,14 @@ body.splitter-dragging * {
     background: #303030;
 }
 
+/* Grows with its text (native field-sizing, so programmatic value changes
+   resize too) from the splitter's min height up to 40% of the panel. */
 textarea {
     width: 100%;
-    height: 54px;
+    field-sizing: content;
+    min-height: 54px;
+    max-height: 40vh;
+    overflow-y: auto;
     resize: none;
     background: transparent;
     border: none;
@@ -2070,6 +2102,91 @@ html.light-theme .effort-btn-caret { color: #888; }
     border-color: var(--accent);
     color: #eee;
 }
+/* Permission-mode menu: title + one-line description per mode, check on the
+   active one. Scoped to .mode-popup so the model popup keeps its look. */
+.mode-popup {
+    width: 300px;
+    max-width: calc(100vw - 24px);
+    padding: 6px;
+}
+.mode-popup-header {
+    font-size: 11px;
+    color: #999;
+    padding: 4px 10px 6px;
+}
+.mode-item {
+    align-items: flex-start;
+    padding: 8px 10px;
+}
+.mode-icon {
+    flex: none;
+    width: 18px;
+    text-align: center;
+    line-height: 18px;
+}
+.mode-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.mode-title {
+    font-size: 13px;
+    color: #eee;
+    line-height: 18px;
+}
+.mode-desc {
+    font-size: 11.5px;
+    color: #a0a0a0;
+    line-height: 1.35;
+}
+.mode-check {
+    flex: none;
+    visibility: hidden;
+    color: var(--accent);
+    line-height: 18px;
+}
+.mode-item.active .mode-check { visibility: visible; }
+/* Bypass permissions: set apart and marked dangerous, in the menu and on the
+   composer button for as long as it is active. */
+.mode-divider {
+    height: 1px;
+    background: #3a3a3a;
+    margin: 4px 6px;
+}
+.mode-danger .mode-title { color: #ec8a83; }
+.mode-danger .mode-check { color: #ec8a83; }
+.mode-item.mode-danger.active {
+    background: rgba(220, 80, 70, 0.12);
+    border-color: #c75450;
+}
+.mode-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(220, 80, 70, 0.18);
+    color: #ec8a83;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: 1px;
+}
+.effort-btn.mode-danger-active {
+    border-color: #c75450;
+    color: #ec8a83;
+    background: rgba(220, 80, 70, 0.12);
+}
+html.light-theme .mode-divider { background: #ddd; }
+html.light-theme .mode-danger .mode-title,
+html.light-theme .mode-danger .mode-check,
+html.light-theme .mode-badge,
+html.light-theme .effort-btn.mode-danger-active { color: #b0352b; }
+html.light-theme .effort-btn.mode-danger-active { border-color: #c0392b; background: rgba(192, 57, 43, 0.08); }
+html.light-theme .mode-popup-header { color: #666; }
+html.light-theme .mode-title { color: #1e1e1e; }
+html.light-theme .mode-desc { color: #5a5a5a; }
+
 html.light-theme .permission-popup {
     background: #fff;
     border-color: #ccc;
@@ -2095,7 +2212,7 @@ html.light-theme .permission-item.active {
     border-radius: 8px;
     border: none;
     background: var(--accent);
-    color: white;
+    color: var(--on-accent, #fff);
     font-size: 18px;
     cursor: pointer;
     transition: background 0.15s;
@@ -2247,6 +2364,8 @@ html.light-theme .rewind-file-list { color: #555; }
     justify-content: flex-start;
 }
 
+/* Your messages stay a right-aligned box; Claude's replies use the full panel
+   width like the VS Code extension (75% squeezed long answers into a column). */
 .bubble {
     max-width: 75%;
     padding: 8px 12px;
@@ -2257,14 +2376,19 @@ html.light-theme .rewind-file-list { color: #555; }
     word-break: break-word;
 }
 
+/* Your messages: a dark box with light text, like the VS Code extension — no
+   longer an accent fill, so no accent choice can make them hard to read. */
 .user .bubble {
-    background: var(--accent);
-    color: white;
+    background: #2f2f2f;
+    border: 1px solid #3c3c3c;
+    color: #ececec;
 }
 
 .assistant .bubble {
     background: #2a2a2a;
     border: 1px solid #3a3a3a;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 /* History-replay continuation: consecutive assistant bubbles are ONE live
@@ -2333,11 +2457,11 @@ html.light-theme .rewind-file-list { color: #555; }
     cursor: pointer;
     transition: background 0.12s ease;
 }
-.message .bubble pre .code-actions button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.message .bubble pre .code-actions button:hover { background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent); }
 .message .bubble pre .apply-btn.applied,
 .message .bubble pre .copy-btn.copied { background: #2d7a2d; color: #fff; border-color: #2d7a2d; }
 html.light-theme .message .bubble pre .code-actions button { background: rgba(255,255,255,0.9); color: var(--accent); border-color: #ccc; }
-html.light-theme .message .bubble pre .code-actions button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+html.light-theme .message .bubble pre .code-actions button:hover { background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent); }
 
 .toast {
     position: fixed;
@@ -2367,12 +2491,13 @@ html.light-theme .toast { background: #fff; color: #1e1e1e; border-color: #ccc; 
     font-size: 12px;
     white-space: pre;
 }
+/* Inline code: neutral text on a soft gray pill. Was orange (#e0a07a) — a
+   reply full of identifiers turned into a wall of orange. */
 .assistant .bubble :not(pre) > code {
-    background: #1e1e1e;
-    border: 1px solid #3a3a3a;
+    background: rgba(255, 255, 255, 0.07);
     border-radius: 4px;
     padding: 1px 5px;
-    color: #e0a07a;
+    color: #dcdcdc;
 }
 .assistant .bubble a { color: var(--accent); text-decoration: underline; }
 .assistant .bubble a.file-link { text-decoration-style: dotted; cursor: pointer; }
@@ -2546,16 +2671,17 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
     color: #b8b8b8;
     padding: 3px 8px;
     margin: 2px 0;
-    border-left: 2px solid var(--accent);
-    background: rgba(216, 135, 99, 0.06);
-    border-radius: 0 4px 4px 0;
+    /* Neutral by default: a long tool run stacks dozens of these, and accent
+       on every one of them shouted. Color is kept for state (error/pending). */
+    background: rgba(255, 255, 255, 0.035);
+    border-radius: 4px;
 }
 .tool-chip .tool-dot {
-    color: var(--accent);
+    color: #6f6f6f;
     margin-right: 6px;
 }
 .tool-chip .tool-name {
-    color: var(--accent);
+    color: #d8d8d8;
     font-weight: 600;
 }
 .tool-chip .tool-arg {
@@ -2571,12 +2697,8 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
     white-space: pre-wrap;
     word-break: break-word;
 }
-.tool-chip.tool-error {
-    border-left-color: #d05050;
-    background: rgba(208, 80, 80, 0.06);
-}
-.tool-chip.tool-error .tool-dot,
-.tool-chip.tool-error .tool-name { color: #d05050; }
+.tool-chip.tool-error .tool-dot { color: #d0675f; }
+.tool-chip.tool-error .tool-summary { color: #c4918c; }
 
 /* #13: subagent live trace, nested under the Task/Agent tool_use chip that
    launched it. Level (off/simple/full) is a client-side setting — this CSS
@@ -2663,6 +2785,30 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
 }
 .tool-diff-error { color: #d05050; }
 .tool-diff-note { color: #6ea36e; }
+
+/* Files a shell/subagent tool changed (agent "tool_files"), one row each. */
+.tool-files { margin: 4px 0 2px 14px; }
+.tool-file-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #c8c8c8;
+    cursor: pointer;
+}
+.tool-file-row:hover { background: rgba(255, 255, 255, 0.05); }
+.tool-file-caret { color: #777; display: inline-block; transition: transform 0.1s ease; }
+.tool-file-row.open .tool-file-caret { transform: rotate(90deg); }
+.tool-file-path { word-break: break-all; }
+.tool-file-add { color: #6ea36e; }
+.tool-file-del { color: #c4716b; }
+.tool-file-stat { color: #888; }
+.tool-file-diff { margin: 4px 0 6px 18px; cursor: text; user-select: text; }
+html.light-theme .tool-file-row { color: #333; }
+html.light-theme .tool-file-row:hover { background: rgba(0, 0, 0, 0.05); }
+html.light-theme .tool-file-add { color: #2e7d32; }
+html.light-theme .tool-file-del { color: #b3261e; }
 
 .tool-diff-body {
     background: #1a1a1a;
@@ -2836,7 +2982,6 @@ html.light-theme .diff-modal-header { border-bottom-color: #ddd; }
 html.light-theme .diff-modal-close { color: #555; }
 
 .tool-chip.tool-pending {
-    border-left-color: #e8b94a;
     background: rgba(232, 185, 74, 0.07);
 }
 .tool-chip.tool-pending .tool-dot,
@@ -2848,9 +2993,11 @@ html.light-theme .diff-modal-close { color: #555; }
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
 }
-html.light-theme .tool-chip { color: #555; background: rgba(176, 92, 53, 0.07); border-left-color: var(--accent); }
-html.light-theme .tool-chip .tool-dot,
-html.light-theme .tool-chip .tool-name { color: var(--accent); }
+html.light-theme .tool-chip { color: #555; background: rgba(0, 0, 0, 0.04); }
+html.light-theme .tool-chip .tool-dot { color: #999; }
+html.light-theme .tool-chip .tool-name { color: #333; }
+html.light-theme .tool-chip.tool-error .tool-dot { color: #c0453c; }
+html.light-theme .tool-chip.tool-error .tool-summary { color: #a0524b; }
 html.light-theme .tool-chip .tool-arg { color: #777; }
 html.light-theme .tool-chip .tool-summary { color: #888; }
 html.light-theme .tool-chip.tool-error { background: rgba(180, 50, 50, 0.07); border-left-color: #b03030; }
@@ -3108,7 +3255,7 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
 .q-yes {
     background: var(--accent);
     border-color: var(--accent);
-    color: white;
+    color: var(--on-accent, #fff);
 }
 
 .q-yes:hover { background: #c4734f; }
@@ -3552,7 +3699,7 @@ html.light-theme .toggle input:checked + .toggle-track { background: rgba(176, 9
 }
 .find-btn:hover { background: #3a3a3a; color: #fff; }
 .find-match { background: #5c4022; color: #f4f4f4; border-radius: 2px; }
-.find-match.current { background: var(--accent); color: #1f1f1f; }
+.find-match.current { background: var(--accent); color: var(--on-accent, #1f1f1f); }
 
 html.light-theme .find-bar { background: #f0f0f0; border-color: #c8c8c8; }
 html.light-theme .find-bar input { background: #fff; border-color: #c8c8c8; color: #1e1e1e; }
@@ -3641,9 +3788,9 @@ html.light-theme .model-select,
 html.light-theme .permission-select { background: #fff; border-color: #bbb; color: #333; }
 html.light-theme .messages { background: #fff; }
 html.light-theme .message.assistant .bubble { background: #efefef; color: #1e1e1e; }
-html.light-theme .message.user .bubble { background: var(--accent); color: #fff; }
+html.light-theme .message.user .bubble { background: #f0f0f0; border-color: #d8d8d8; color: #1e1e1e; }
 html.light-theme .assistant .bubble pre { background: #e8e8e8; border-color: #ccc; }
-html.light-theme .assistant .bubble :not(pre) > code { background: #e0e0e0; border-color: #ccc; color: var(--accent); }
+html.light-theme .assistant .bubble :not(pre) > code { background: rgba(0, 0, 0, 0.06); color: #1e1e1e; }
 html.light-theme .assistant .bubble a { color: var(--accent); }
 html.light-theme .composer { background: #f5f5f5; }
 html.light-theme .input { background: #fff; border-color: #ccc; }
@@ -3664,3 +3811,217 @@ html.light-theme .usage-raw { color: #333; }
 html.light-theme .diff-stat { color: #666; border-bottom-color: #d0d0d0; }
 html.light-theme .diff-body pre { background: #ebebeb; }
 html.light-theme .history-delete:hover { background: #ddd; }
+/* ── Composer toolbar, VS Code-style ─────────────────────────────────────
+   One row under a hairline: + menu, /, context ring, Remote Control on the
+   left; model·effort pill, mode and send on the right. */
+.input .composer-actions {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #353535;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.left-buttons { align-items: center; gap: 2px; }
+.left-buttons .composer-btn { font-size: 16px; color: #a8a8a8; }
+.composer-slash { font-family: Cascadia Code, Consolas, monospace; font-size: 15px; font-weight: 600; }
+.attach-control, .model-control { position: relative; }
+.attach-popup { left: 0; right: auto; min-width: 220px; }
+.attach-popup .permission-item { gap: 10px; }
+.attach-icon { width: 16px; text-align: center; color: #999; }
+
+.ctx-ring {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    color: #a0a0a0;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.ctx-ring[hidden] { display: none; }
+.ctx-ring:hover { background: #3a3a3a; }
+.ctx-ring svg { transform: rotate(-90deg); }
+.ctx-ring-track { fill: none; stroke: #444; stroke-width: 3; }
+.ctx-ring-fill { fill: none; stroke: #9a9a9a; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0 100; }
+.ctx-ring.ctx-high .ctx-ring-fill { stroke: #d0675f; }
+
+.rc-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid #3c3c3c;
+    background: none;
+    color: #9a9a9a;
+    font-size: 11.5px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.rc-pill:hover { border-color: #555; color: #ccc; }
+.rc-dot { width: 7px; height: 7px; border-radius: 50%; background: #666; flex: none; }
+.rc-pill[data-state="pending"] .rc-dot,
+.rc-pill[data-state="connecting"] .rc-dot { background: #e8b94a; }
+.rc-pill[data-state="connected"] { background: #2f4a8a; border-color: #3d5aa8; color: #e8eefc; }
+.rc-pill[data-state="connected"] .rc-dot { background: #7fd18b; }
+.rc-pill[data-state="error"] .rc-dot { background: #d0675f; }
+.rc-open { color: inherit; text-decoration: none; opacity: 0.85; margin-left: 2px; }
+.rc-open:hover { opacity: 1; }
+
+/* Model and effort read as one pill: "Opus 5 · med". */
+.model-effort-pill {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #444;
+    border-radius: 8px;
+    background: #2a2a2a;
+}
+.model-effort-pill .effort-btn { border: none; background: none; }
+.model-effort-pill #effort-btn-icon,
+.model-effort-pill .effort-btn-caret { display: none; }
+.pill-sep { color: #666; }
+/* Mode reads as text + icon, boxed only when it is the dangerous one. */
+.permission-control .effort-btn:not(.mode-danger-active) { border-color: transparent; background: none; }
+
+html.light-theme .input .composer-actions { border-top-color: #ddd; }
+html.light-theme .left-buttons .composer-btn,
+html.light-theme .ctx-ring { color: #555; }
+html.light-theme .ctx-ring:hover { background: #e6e6e6; }
+html.light-theme .ctx-ring-track { stroke: #d6d6d6; }
+html.light-theme .ctx-ring-fill { stroke: #777; }
+html.light-theme .rc-pill { border-color: #ccc; color: #555; }
+html.light-theme .rc-pill[data-state="connected"] { background: #dce6fb; border-color: #9fb6ea; color: #1d3a7a; }
+html.light-theme .model-effort-pill { background: #fff; border-color: #ccc; }
+
+/* ── Composer toolbar: compact & minimal ────────────────────────────────
+   Smaller controls, no loud fills: send is a small accent square, stop is a
+   neutral square (not red), pills are hairline outlines. */
+.input .composer-actions { padding-top: 6px; gap: 4px; }
+.left-buttons .composer-btn { font-size: 14px; padding: 2px 5px; color: #9a9a9a; }
+.left-buttons .composer-btn:hover { color: #e0e0e0; }
+.composer-slash { font-size: 13px; }
+.ctx-ring svg { width: 14px; height: 14px; }
+#ctx-ring-pct { display: none; }
+.right-buttons { gap: 4px; }
+
+.send {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.send:hover { filter: brightness(1.08); }
+.send.stop {
+    background: #3c3c3c;
+    color: #e6e6e6;
+    font-size: 10px;
+}
+.send.stop:hover { background: #4a4a4a; filter: none; }
+
+.model-effort-pill { border-color: #3a3a3a; border-radius: 6px; background: transparent; }
+.model-effort-pill .effort-btn,
+.permission-control .effort-btn { height: 22px; padding: 2px 6px; font-size: 11.5px; color: #b8b8b8; }
+.model-effort-pill .effort-btn:hover,
+.permission-control .effort-btn:not(.mode-danger-active):hover { color: #eee; }
+
+.rc-pill { padding: 2px 8px; font-size: 11px; gap: 5px; }
+.rc-dot { width: 6px; height: 6px; }
+
+/* Running agents popover: type, description, elapsed. */
+.agents-control { position: relative; display: inline-flex; align-items: center; }
+.agents-control[hidden] { display: none; }
+.agents-popup { left: 0; right: auto; min-width: 280px; max-width: min(420px, calc(100vw - 24px)); }
+.agents-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; }
+.agents-row-type { color: #ddd; font-weight: 600; }
+.agents-row-desc { color: #9a9a9a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-row-time { color: #777; font-variant-numeric: tabular-nums; }
+.agents-pill .rc-dot { background: #7fd18b; }
+
+html.light-theme .send.stop { background: #e2e2e2; color: #333; }
+html.light-theme .send.stop:hover { background: #d4d4d4; }
+html.light-theme .left-buttons .composer-btn { color: #666; }
+html.light-theme .left-buttons .composer-btn:hover { color: #222; }
+html.light-theme .model-effort-pill { border-color: #d0d0d0; }
+html.light-theme .model-effort-pill .effort-btn,
+html.light-theme .permission-control .effort-btn { color: #444; }
+html.light-theme .agents-row-type { color: #222; }
+html.light-theme .agents-row-desc { color: #666; }
+
+/* "/" list: the CLI's full command list is long — scroll it, and show each
+   command's description beside its name (VS Code-like). */
+.cmd-autocomplete:not(.at-autocomplete) { max-height: 320px; overflow-y: auto; }
+.cmd-autocomplete-item { display: flex; align-items: baseline; gap: 12px; }
+.cmd-ac-name { flex: none; }
+.cmd-ac-desc {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #8a8a8a;
+    font-family: Segoe UI, Arial, sans-serif;
+    font-size: 12px;
+}
+.cmd-autocomplete-item.ac-selected .cmd-ac-desc,
+.cmd-autocomplete-item:hover .cmd-ac-desc { color: #b0b0b0; }
+html.light-theme .cmd-ac-desc { color: #777; }
+
+/* Plugins panel (/plugin) */
+.plugins-modal { width: 640px; max-width: calc(100vw - 40px); max-height: calc(100vh - 60px); display: flex; flex-direction: column; padding: 16px; }
+.plugins-head { display: flex; align-items: center; justify-content: space-between; }
+.plugins-head h3 { margin: 0; }
+.plugins-close { background: none; border: none; color: #999; cursor: pointer; font-size: 14px; padding: 2px 6px; }
+.plugins-close:hover { color: #eee; }
+.plugins-tabs { display: flex; gap: 4px; margin: 12px 0 10px; border-bottom: 1px solid #333; }
+.plugins-tabs button { background: none; border: none; border-bottom: 2px solid transparent; color: #999; cursor: pointer; font-size: 12px; padding: 6px 10px; margin-bottom: -1px; }
+.plugins-tabs button.active { color: #eee; border-bottom-color: #bbb; }
+.plugins-bar { display: flex; gap: 6px; margin-bottom: 10px; }
+.plugins-bar[hidden] { display: none; }
+.plugins-modal .plugins-bar input { flex: 1; margin: 0; }
+.plugins-bar select { background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #ddd; font-size: 12px; padding: 0 6px; }
+.plugins-bar select[hidden] { display: none; }
+.plugins-list { flex: 1; min-height: 120px; overflow-y: auto; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; }
+.plugins-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-bottom: 1px solid #2a2a2a; }
+.plugins-row:last-child { border-bottom: none; }
+.plugins-row:hover { background: #222; }
+.plugins-row-body { flex: 1; min-width: 0; }
+.plugins-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.plugins-row-name { color: #eee; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugins-chip { flex: none; font-size: 10px; color: #aaa; background: #2a2a2a; border-radius: 3px; padding: 1px 5px; }
+.plugins-row-desc { color: #999; font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugins-row-actions { display: flex; gap: 4px; flex: none; }
+.plugins-btn { background: #2a2a2a; border: 1px solid #444; border-radius: 5px; color: #ddd; cursor: pointer; font-size: 11px; padding: 3px 9px; white-space: nowrap; }
+.plugins-btn:hover:not(:disabled) { background: #333; }
+.plugins-btn:disabled { opacity: 0.45; cursor: default; }
+.plugins-btn.danger:hover:not(:disabled) { color: #f08080; border-color: #7a3a3a; }
+.plugins-empty { color: #888; font-size: 12px; padding: 14px; text-align: center; }
+.plugins-status { min-height: 16px; margin-top: 8px; font-size: 12px; color: #999; white-space: pre-wrap; }
+.plugins-status.error { color: #e08080; }
+html.light-theme .plugins-list { background: #fafafa; border-color: #ddd; }
+html.light-theme .plugins-row { border-bottom-color: #eee; }
+html.light-theme .plugins-row:hover { background: #f0f0f0; }
+html.light-theme .plugins-row-name { color: #222; }
+html.light-theme .plugins-chip, html.light-theme .plugins-btn, html.light-theme .plugins-bar select { background: #eee; color: #444; border-color: #ccc; }
+html.light-theme .plugins-tabs { border-bottom-color: #ddd; }
+html.light-theme .plugins-tabs button.active { color: #222; border-bottom-color: #666; }
+
+/* ⋯ menu (top bar): icon + label rows */
+#more-wrap .cmd-trigger { font-size: 20px; }
+.more-menu { min-width: 210px; }
+.more-item { display: flex; align-items: center; gap: 10px; font-family: inherit; }
+.more-icon { width: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; color: #aaa; flex: none; }
+.more-item:hover .more-icon { color: #fff; }
+.more-item#btn-layout.active::after { content: "✓"; margin-left: auto; color: #aaa; }
+html.light-theme .more-icon { color: #666; }
+html.light-theme .more-item:hover .more-icon { color: #000; }
+
+.tool-files-note { font-size: 11px; color: #888; padding: 2px 6px 4px; font-style: italic; }

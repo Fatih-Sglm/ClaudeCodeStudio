@@ -63,7 +63,11 @@ public static class NativeTheme
     }
 
     // Called by the chat message handler after persisting a new appearance choice.
-    public static void NotifyChanged() => Changed?.Invoke();
+    public static void NotifyChanged()
+    {
+        Localization.Strings.Reload();
+        Changed?.Invoke();
+    }
 
     // Resolves the palette from the persisted override (or the live VS theme).
     public static ThemePalette Resolve()

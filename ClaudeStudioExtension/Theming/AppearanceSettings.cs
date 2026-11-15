@@ -24,6 +24,9 @@ public class AppearanceSettings
     // (#d88763 in dark, #b05c35 in light).
     public string? Accent { get; set; }
 
+    // "auto" (follow the Visual Studio UI language), "en", or "tr".
+    public string UiLanguage { get; set; } = "auto";
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? UnknownProperties { get; set; }
 

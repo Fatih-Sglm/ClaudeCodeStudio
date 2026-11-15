@@ -46,13 +46,16 @@ Unlike terminal-embedding extensions, Claude Code Studio does **not** host a con
 
 ### Permissions & modes
 - **Inline permission prompts** — tool calls that need approval surface a modal with **Allow**, **Allow for session**, and **Deny**, showing the working directory the call runs in. Backed by a `PreToolUse` hook over a named pipe, not a terminal prompt.
-- **Permission modes** — switch between **ask**, **plan** (Exit Plan Mode becomes an explicit "Approve plan" modal), **bypass permissions** (yolo), and **don't ask** (read-only: reads and searches run freely, all edits are blocked by the CLI).
+- **Permission modes** — the same four as the VS Code extension: **Manual** (asks before each edit or command), **Edit automatically** (workspace edits run without asking, commands still ask), **Plan** (Exit Plan Mode becomes an explicit "Approve plan" modal), and **Auto** (the CLI's safety check approves routine actions; anything it pauses on opens the permission modal). **Bypass permissions** is also available, set apart and marked dangerous: every tool runs without asking.
+- **Edit automatically's limits** — it still asks for edits that can grant permissions or run code: anything under `.git`, `.claude`, `.vscode`, `.idea`, `.vs`, `.husky`; `.mcp.json`, `.gitattributes`, `.gitmodules`, `.gitconfig`, `nuget.config`, `global.json`; MSBuild files (`*.*proj`, `*.props`, `*.targets`, `*.user`); paths through a symlink/junction; and names Windows maps elsewhere (`GIT~1`, `a:stream`, trailing dot/space). It does **not** cover every file a build or tool may execute (e.g. `package.json` scripts, `.ps1`/`.cmd` build scripts) — like the CLI's own mode, treat it as "trusted repo" convenience, not a sandbox.
+- **Default mode** — Settings → Default mode picks what the panel opens in; a new chat keeps the mode you were using (Bypass falls back to the default).
 - **Permission rules** — allow / deny / ask rules honored per session.
 
 ### Diffs, rewind & branching
 - **Native diff viewer** — Edit/Write chips open the real Visual Studio diff (`IVsDifferenceService`), inline or in a modal.
 - **Rewind (⟲)** — roll a session back to an earlier point (dry-run preview, then revert).
 - **Branch (⎇)** — fork the conversation from a chosen message into a new line.
+- **Files changed by commands** — Bash/PowerShell/subagent chips list the files that changed while they ran, each with an inline diff (private git index snapshots; your own index is untouched). Tools that ran in parallel share one list, marked as such; edits you make in the workspace during a run show up there too.
 
 ### Session history
 - **Per-workspace history** — list past sessions for the current folder and resume any of them in one click.
@@ -66,12 +69,19 @@ Unlike terminal-embedding extensions, Claude Code Studio does **not** host a con
 - **Editor selection → prompt** — send the current editor selection as a formatted, path-and-line-annotated snippet.
 - **Image & file paste** — paste images (Ctrl+V) or attach files; binaries are shared with the CLI via a temp `--add-dir`.
 - **Prompt history** — browse previous prompts with Ctrl+Up / Ctrl+Down, with an `N/total` indicator.
+- **Send while working** — a prompt sent during a turn is queued and goes out when the turn ends; ■ stops the turn and sends the queued one.
+- **Context ring** — shows how full the context window is; click it to `/compact`.
+- **Remote Control** — the composer's Remote Control switch exposes the session to claude.ai/code and the Claude app (works mid-turn).
+- **Running agents** — a counter of subagents still running, with a details popover.
 
 ### Usage & cost
 - **Usage dashboard** — token usage and computed cost per session, with auto-refresh, model breakdown, and a filter to a single session. Cache-write pricing is split by TTL (5-minute vs 1-hour) so long sessions are costed correctly.
 - **Cost limits** — a soft spend warning plus an optional hard per-session budget (`--max-budget-usd`) that stops the turn when reached.
 
-### Command palette (⌘)
+### Plugins (`/plugin`)
+- **Plugin manager** — Installed / Discover / Marketplaces tabs over `claude plugin …`: install (user/project/local scope), enable/disable, update, uninstall, and add/update/remove marketplaces. Changes apply to new chats. Installs that need a marketplace-declared command confirmed are left to the terminal.
+
+### Command palette (⌘, in the ⋯ menu)
 A single palette gathers on-demand tools that render as inline cards:
 - **🩺 Doctor** — run `claude doctor` and show the report.
 - **MCP status & reconnect** — inspect MCP servers and reconnect them.
@@ -86,11 +96,13 @@ A single palette gathers on-demand tools that render as inline cards:
 
 ### Configuration
 - **Settings panel** — a searchable settings UI (search matches label, tooltip, and section) that passes through the full Claude Code settings surface, with info tooltips on individual controls.
-- **Model picker** — Sonnet 5 / Sonnet 4.6, Opus 5, Opus 4.8, Opus Plan, Fable 5, Haiku 4.5, plus an effort level (low → max; "max" is session-only).
+- **Model picker** — Sonnet 5.5 / 5 / 4.6, Opus 5.5 / 5 / 4.8, Opus Plan, Fable 5.2 / 5.1 / 5, Haiku 4.5, plus an effort level (low → max; "max" is session-only). Settings → Default model fixes what new chats start with ("Last used" keeps the last pick).
+- **Language** — English or Turkish UI, following Visual Studio's language by default (Settings → Language); technical terms stay in English.
 - **Fallback model** — an optional `--fallback-model` used when the primary model is overloaded, with a divider marking when it engages.
 - **Configurable CLI path** — point at a specific `claude` executable, or let detection pick it (it prefers `~/.local/bin/claude.exe` — the native installer's target — over a possibly-stale copy on `PATH`, and warns when the two diverge).
 - **Status line** — an optional configurable status command rendered under the path bar.
-- **Theme aware** — follows the Visual Studio light/dark theme, with an accent/override option.
+- **Theme aware** — follows the Visual Studio light/dark theme, with an accent/override option (colored accents can be switched off).
+- **Performance metrics** — an opt-in Settings checkbox that appends durations and counts (never prompt or reply text) to `perf.jsonl`.
 
 ## How it works
 

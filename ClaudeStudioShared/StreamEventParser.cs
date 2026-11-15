@@ -46,7 +46,7 @@ public static class StreamEventParser
     // need to special-case ordering around this method's return value.
     public static StreamEventResult Process(
         JsonElement evt, StreamEventState state, long elapsedMs,
-        string? workingDirectory, string expectedCliPermissionMode, string requestedPermissionMode)
+        string? workingDirectory, string expectedCliPermissionMode, PermissionMode requestedPermissionMode)
     {
         var result = new StreamEventResult();
 
@@ -62,7 +62,7 @@ public static class StreamEventParser
         else if (type == "user")
             ProcessUser(evt, result);
         else if (type == "control_request")
-            ProcessControlRequest(evt, workingDirectory, result);
+            ProcessControlRequest(evt, workingDirectory, requestedPermissionMode, result);
         else if (type == "rate_limit_event")
             ProcessRateLimitEvent(evt, result);
         else if (type == "result")
@@ -73,7 +73,7 @@ public static class StreamEventParser
 
     private static void ProcessSystem(
         JsonElement evt, StreamEventState state, long elapsedMs,
-        string expectedCliPermissionMode, string requestedPermissionMode, StreamEventResult result)
+        string expectedCliPermissionMode, PermissionMode requestedPermissionMode, StreamEventResult result)
     {
         if (!evt.TryGetProperty("subtype", out var subProp)) return;
         var subtypeStr = subProp.GetString();
@@ -97,6 +97,13 @@ public static class StreamEventParser
                 result.Chunks.Add(new ChatChunk { Type = "compacting", Text = "start" });
             else if (evt.TryGetProperty("compact_result", out _))
                 result.Chunks.Add(new ChatChunk { Type = "compacting", Text = "stop" });
+            return;
+        }
+        // Remote Control link status ("ready" → "connected", …).
+        if (subtypeStr == "bridge_state")
+        {
+            if (evt.TryGetProperty("state", out var bridgeState) && bridgeState.ValueKind == JsonValueKind.String)
+                result.Chunks.Add(new ChatChunk { Type = "remote-state", Text = bridgeState.GetString() ?? "" });
             return;
         }
         if (subtypeStr == "compact_boundary")
@@ -402,7 +409,7 @@ public static class StreamEventParser
         }
     }
 
-    private static void ProcessControlRequest(JsonElement evt, string? workingDirectory, StreamEventResult result)
+    private static void ProcessControlRequest(JsonElement evt, string? workingDirectory, PermissionMode requestedPermissionMode, StreamEventResult result)
     {
         // Bidirectional control channel (--permission-prompt-tool stdio).
         // claude blocks waiting for our control_response, so every one MUST be
@@ -424,15 +431,18 @@ public static class StreamEventParser
             // user picks. claude waits on stdin.
             result.PendingAsk = (toolUseId, reqId, inputRaw);
         }
-        else if (toolName == "ExitPlanMode" && toolUseId != null)
+        else if ((toolName == "ExitPlanMode" || requestedPermissionMode == PermissionMode.Auto) && toolUseId != null)
         {
-            // Plan approval gate — surfaced as a permission modal rather than
-            // auto-allowed.
+            // Surfaced as a permission modal rather than auto-allowed:
+            //  - ExitPlanMode is the plan approval gate.
+            //  - In Auto mode the CLI's own safety check is the gatekeeper (no
+            //    PreToolUse hook), so a can_use_tool here IS claude pausing for
+            //    a human — auto-allowing it would void the mode's safety.
             result.PendingControlPerm = (toolUseId, reqId, inputRaw);
             result.Chunks.Add(new ChatChunk
             {
                 Type = "permission_request",
-                Tool = "ExitPlanMode",
+                Tool = toolName,
                 ToolInput = inputRaw,
                 ToolId = toolUseId,
                 Cwd = workingDirectory
